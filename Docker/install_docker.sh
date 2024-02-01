@@ -35,8 +35,5 @@ sudo usermod -aG docker $USER
 # Validate Docker installation
 docker --version
 
-# Install Java
-sudo apt install -y openjdk-19-jre-headless
-
 # Reminder for manual restart
 echo "Please manually restart your system to ensure all changes are applied correctly."
