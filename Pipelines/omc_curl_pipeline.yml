@@ -1,0 +1,96 @@
+pipeline {
+    agent { label 'OMC' }
+
+    stages {
+        stage('Create Curl Dockerfile') {
+            steps {
+                script {
+                    writeFile file: 'Dockerfile', text: '''
+                        # Stage 1: Build curl in a larger image with necessary build tools
+                        FROM alpine:latest as builder
+
+                        # Install necessary build tools and libraries
+                        RUN apk --no-cache add git autoconf automake build-base libtool pcre-dev openssl-dev perl
+
+                        # Clone the curl repository
+                        RUN git clone https://github.com/curl/curl.git
+
+                        # Change to the curl directory
+                        WORKDIR /curl
+
+                        # Build curl with SSL support, shared library, and without libpsl
+                        RUN autoreconf -fi && \
+                            ./configure --with-ssl --enable-shared --without-libpsl && \
+                            make && \
+                            make install
+
+                        # Stage 2: Create a smaller final image
+                        FROM alpine:latest
+
+                        # Copy the curl binary from the builder stage
+                        COPY --from=builder /usr/local/bin/curl /usr/local/bin/curl
+                        COPY --from=builder /usr/local/lib /usr/local/lib
+
+                        # Set LD_LIBRARY_PATH to find libcurl
+                        ENV LD_LIBRARY_PATH=/usr/local/lib
+
+                        # Set the entrypoint to curl
+                        ENTRYPOINT ["curl"]
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    try {
+                        sh 'docker build -t omc-curl .'
+                    } catch (Exception e) {
+                        echo "Error building Docker image: ${e.getMessage()}"
+                        throw e
+                    }
+                }
+            }
+        }
+
+        stage('Test Docker Curl Image') {
+            steps {
+                script {
+                    try {
+                        sh 'docker run --rm omc-curl https://omc.co.il'
+                    } catch (Exception e) {
+                        echo "Error testing Curl: ${e.getMessage()}"
+                        throw e
+                    }
+                }
+            }
+        }
+
+        stage('Archive Docker Curl Image') {
+            steps {
+                script {
+                    try {
+                        sh 'docker save omc-curl > omc-curl.tar'
+                        archiveArtifacts artifacts: 'omc-curl.tar'
+                    } catch (Exception e) {
+                        echo "Error archiving Docker image: ${e.getMessage()}"
+                        throw e
+                    }
+                }
+            }
+        }
+    }
+    // Cleanup
+    post {
+        always {
+            script {
+                try {
+                    sh 'docker rmi omc-curl'
+                } catch (Exception e) {
+                    echo "Error cleaning up Docker images: ${e.getMessage()}"
+                }
+            }
+        }
+    }
+}
