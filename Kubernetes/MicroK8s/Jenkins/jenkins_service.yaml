@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-server
+spec:
+  type: NodePort
+  ports:
+    - name: web      # Web access
+      port: 8080
+      targetPort: 8080
+      nodePort: 8080
+    - name: agent    # Internal comms
+      port: 50000
+      targetPort: 50000
+  selector:
+    app: jenkins-server
