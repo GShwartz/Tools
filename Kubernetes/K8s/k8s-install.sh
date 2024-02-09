@@ -145,3 +145,7 @@ echo
 
 kubectl get pods -n kube-system
 kubectl get nodes
+
+echo "Use the following command to create new joining commands:"
+echo "kubeadm token create --print-join-command"
+echo ""
