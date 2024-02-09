@@ -23,6 +23,19 @@ are_all_system_pods_ready() {
     return $?
 }
 
+# Function to display a spinning animation
+spin() {
+    spinner="/-\|"
+    while :
+    do
+        for i in `seq 0 3`
+        do
+            echo -ne "\r${spinner:i:1} $1"
+            sleep 0.1
+        done
+    done
+}
+
 # Updating system packages
 printf '=%.0s' {1..140}
 echo
@@ -104,15 +117,27 @@ echo
 echo "Applying Calico network plugin..."
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
 
-# Main loop to check readiness
+# Main loop to check readiness with spinning animation
 while true; do
     if are_all_nodes_ready && are_all_system_pods_ready; then
+		# Kill the spinner process
+        kill $SPIN_PID 2>/dev/null  
+		
+		echo ""
         echo "All nodes and system pods are ready."
-        break
+        echo ""
+        
+		break
     else
-        echo "Waiting for system pods..."
-		sleep 5
-	fi
+        # Start spinner in the background and get its process ID
+        spin "Waiting for nodes and system pods to become ready..." &
+        SPIN_PID=$!
+		
+        sleep 5
+		
+		# Kill the spinner process to restart it
+        kill $SPIN_PID 2>/dev/null  
+    fi
 done
 
 printf '=%.0s' {1..140}
