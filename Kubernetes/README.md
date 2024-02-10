@@ -1,6 +1,6 @@
 # Kubernetes Command Guide
 
-## Labels
+# Labels
 ### Assigning a Label to a Node
 
 ```bash
@@ -12,7 +12,7 @@ kubectl label nodes <node-name> node-role.kubernetes.io/master=master
 ```
 
 
-## Namespaces
+# Namespaces
 ### List all namespaces <br />
 ```bash
 kubectl get ns
@@ -31,7 +31,7 @@ kubectl delete namespace [namespace-name]
 ```
 
 
-## Node and cluster management
+# Node and cluster management
 ### Lists all nodes in the cluster <br />
 ```bash
 kubectl get nodes
@@ -46,7 +46,7 @@ kubectl drain [node-name]
 ```
 
 
-## POD management
+# POD management
 ### Lists all pods in the namespace <br />
 ```bash
 kubectl get pods
@@ -65,7 +65,7 @@ kubectl exec [pod-name] -- [command]
 ```
 
 
-## Deployment management
+# Deployment management
 ### Lists all deployments in the namespace <br />
 ```bash
 kubectl get deployments
