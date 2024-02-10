@@ -65,5 +65,18 @@ kubectl exec [pod-name] -- [command]
 ```
 
 
+## Deployment management
+### Lists all deployments in the namespace <br />
+```bash
+kubectl get deployments
+```
+### Shows the status of a specific deployment rollout <br />
+```bash
+kubectl rollout status deployment/[deployment-name]
+```
+### Rolls back to the previous deployment <br />
+```bash
+kubectl rollout undo deployment/[deployment-name]
+```
 
 
