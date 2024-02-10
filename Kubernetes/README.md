@@ -1,15 +1,11 @@
 # Kubernetes Command Guide
 
 ## Labels
-
-Labels in Kubernetes are key/value pairs attached to objects like nodes for identification and organization.
-
 ### Assigning a Label to a Node
 
 ```bash
 kubectl label nodes <node-name> node-role.kubernetes.io/worker=<label_name>
 ```
-
 ### Set node as master: <br />
 ```bash
 kubectl label nodes <node-name> node-role.kubernetes.io/master=master
@@ -33,5 +29,41 @@ kubectl describe namespace [namespace-name]
 ```bash
 kubectl delete namespace [namespace-name]
 ```
+
+
+## Node and cluster management
+### Lists all nodes in the cluster <br />
+```bash
+kubectl get nodes
+```
+### Mark the node as unschedulable <br />
+```bash
+kubectl cordon [node-name]
+```
+### Drains all pods from the node in preparation for maintenance <br />
+```bash
+kubectl drain [node-name]
+```
+
+
+## POD management
+### Lists all pods in the namespace <br />
+```bash
+kubectl get pods
+```
+### Shows detailed information about a specific pod <br />
+```bash
+kubectl describe pod [pod-name]
+```
+### Fetches the logs of a specific pod <br />
+```bash
+kubectl logs [pod-name]
+```
+### Executes a command in a specific pod <br />
+```bash
+kubectl exec [pod-name] -- [command]
+```
+
+
 
 
