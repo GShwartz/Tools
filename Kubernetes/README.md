@@ -1,21 +1,37 @@
-### Labels
-- Give a label to a node: <br />
-kubectl label nodes <node-name> node-role.kubernetes.io/worker=<label_name> <br />
+# Kubernetes Command Guide
 
-- Set node as master: <br />
-kubectl label nodes <node-name> node-role.kubernetes.io/master=master <br/>
+## Labels
 
-### Namespaces
-- List all namespaces <br />
-kubectl get ns <br/>
+Labels in Kubernetes are key/value pairs attached to objects like nodes for identification and organization.
 
-- Create namespace <br />
-kubectl create namespace [namespace-name] <br />
+### Assigning a Label to a Node
 
-- Describe namespace <br />
-kubectl describe namespace [namespace-name] <br />
+```bash
+kubectl label nodes <node-name> node-role.kubernetes.io/worker=<label_name>
+```
 
-- Delete namespace <br />
-kubectl delete namespace [namespace-name] <br />
+### Set node as master: <br />
+```bash
+kubectl label nodes <node-name> node-role.kubernetes.io/master=master
+```
+
+
+## Namespaces
+### List all namespaces <br />
+```bash
+kubectl get ns
+```
+### Create namespace <br />
+```bash
+kubectl create namespace [namespace-name]
+```
+### Describe namespace <br />
+```bash
+kubectl describe namespace [namespace-name]
+```
+### Delete namespace <br />
+```bash
+kubectl delete namespace [namespace-name]
+```
 
 
