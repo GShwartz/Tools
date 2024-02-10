@@ -1,5 +1,13 @@
 # Kubernetes Command Guide
 
+
+# Applying Configuration
+### Applies a configuration to a resource from a file <br />
+```bash
+kubectl apply -f [config-file]
+```
+
+
 # Labels
 ### Assigning a Label to a Node
 
@@ -77,6 +85,46 @@ kubectl rollout status deployment/[deployment-name]
 ### Rolls back to the previous deployment <br />
 ```bash
 kubectl rollout undo deployment/[deployment-name]
+```
+
+
+# Service management
+### Lists all services in the namespace <br />
+```bash
+kubectl get services
+```
+### Exposes a deployment as a new Kubernetes service <br />
+```bash
+kubectl expose deployment [deployment-name]
+```
+
+
+# ConfigMap and Secret Management
+### Creates a new secret from literals <br />
+```bash
+kubectl create secret generic [secret-name] --from-literal=[key]=[value]
+```
+### Lists all configmaps in the namespace <br />
+```bash
+kubectl get configmaps
+```
+
+
+# Resource Inspection
+### Shows metrics for pods in the namespace <br />
+```bash
+kubectl top pod
+```
+### Shows detailed information about a specific node <br />
+```bash
+kubectl describe node [node-name]
+```
+
+
+# Scaling Resources
+### Scales a deployment to the specified number of replicas <br />
+```bash
+kubectl scale deployment [deployment-name] --replicas=[number]
 ```
 
 
