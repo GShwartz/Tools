@@ -3,7 +3,6 @@
 # Updating and upgrading system packages
 echo "Updating system packages..."
 sudo apt update
-sudo apt upgrade -y
 
 # Disabling swap - required for Kubernetes
 echo "Disabling swap..."
@@ -47,7 +46,7 @@ sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmo
 
 # Adding Docker repository
 echo "Adding Docker repository..."
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
 # Installing containerd
 echo "Installing containerd..."
@@ -67,7 +66,7 @@ curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearm
 
 # Adding Kubernetes repository
 echo "Adding Kubernetes repository..."
-sudo apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb http://apt.kubernetes.io/ kubernetes-xenial main"
 
 # Updating package listings
 echo "Updating package listings..."
