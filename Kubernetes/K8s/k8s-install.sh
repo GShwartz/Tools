@@ -154,7 +154,7 @@ echo "Installing containerd..."
 sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/docker.gpg
 
-# Set the script to auto answer the prompt
+# Add docker repo
 sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
 sudo apt install -y containerd.io
@@ -169,7 +169,7 @@ echo
 echo "Installing Kubernetes components (kubeadm, kubelet, kubectl)..."
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/kubernetes-xenial.gpg
 
-# Set the script to auto answer the prompt
+# Add k8s repo
 sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb http://apt.kubernetes.io/ kubernetes-xenial main"
 
 sudo apt update
