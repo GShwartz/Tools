@@ -25,7 +25,6 @@ services:
     depends_on:
       - jenkins-server
     command: >
-      // Note: the host needs openjdk21-jre (version num can be changed) installed before running this command.
       /bin/sh -c "apk --no-cache add openjdk21-jre curl docker && tail -f /dev/null"
     restart: always
 
