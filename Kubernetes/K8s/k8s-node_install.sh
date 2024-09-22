@@ -1,86 +1,179 @@
 #!/bin/bash
 
-# Updating and upgrading system packages
-echo "Updating system packages..."
-sudo apt update
 
-# Disabling swap - required for Kubernetes
-echo "Disabling swap..."
-sudo swapoff -a
+disable_swap() {
+	sudo swapoff -a
 
-# Removing swap entry from /etc/fstab to make the change permanent
-echo "Updating /etc/fstab to disable swap permanently..."
-sudo sed -i '$ d' /etc/fstab
+	echo "Commenting swap line in /etc/fstab..."
+	sudo sed -i '/ swap / s/^/# /' /etc/fstab
+}
 
-# Setting up required kernel modules for containerd
-echo "Configuring kernel modules for containerd..."
-sudo tee /etc/modules-load.d/containerd.conf <<EOF
-overlay
-br_netfilter
+install_dependencies() {
+	sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release socat conntrack
+}
+
+open_ports() {
+	sudo ufw allow 6443/tcp   # Kubernetes API server
+	sudo ufw allow 2379:2380/tcp  # etcd server client API
+	sudo ufw allow 10250/tcp  # Kubelet API
+	sudo ufw allow 10259/tcp  # kube-scheduler
+	sudo ufw allow 10257/tcp  # kube-controller-manager
+}
+
+config_sysctl_params() {
+	echo "Config_Sysctl_Params: Loading necessary kernel modules..."
+
+	sudo modprobe overlay
+	sudo modprobe br_netfilter
+	
+	sudo tee /etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.ipv4.ip_forward                 = 1
+EOF
+	
+	echo "Config_Sysctl_Params: Applying sysctl params..."
+	sudo sysctl --system
+}
+
+install_containerd() {
+	sudo apt install -y containerd
+
+	echo "Configuring containerd..."
+	sudo mkdir -p /etc/containerd
+	sudo containerd config default | sudo tee /etc/containerd/config.toml
+
+	echo "Setting cgroup driver to systemd in containerd config..."
+	sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+	echo "Restarting containerd..."
+	sudo systemctl restart containerd
+	sudo systemctl enable containerd
+}
+
+pre_k8s_cleanup() {
+	sudo rm -f /etc/apt/sources.list.d/kubernetes.list
+	sudo rm -f /etc/apt/sources.list.d/google-cloud-sdk.list
+	sudo sed -i '/kubernetes/d' /etc/apt/sources.list
+	sudo sed -i '/packages.cloud.google.com/d' /etc/apt/sources.list
+}
+
+update_signing_key() {
+	sudo mkdir -p /etc/apt/keyrings
+	curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+}
+
+add_k8s_repo() {
+	echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+}
+
+install_k8s() {
+	sudo apt-get install -y kubelet kubeadm kubectl
+
+	echo "Install_K8s: Locking current version of kubelet, kubeadm, kubectl..."
+	sudo apt-mark hold kubelet kubeadm kubectl
+
+	echo "Install_K8s: Enabling and starting kubelet service..."
+	sudo systemctl enable --now kubelet
+}
+
+config_k8s() {
+	sudo mkdir -p /etc/systemd/system/kubelet.service.d
+	cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
+[Service]
+Environment="KUBELET_EXTRA_ARGS=--container-runtime=remote --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
 EOF
 
-# Loading the overlay and br_netfilter modules
-echo "Loading kernel modules..."
-sudo modprobe overlay
-sudo modprobe br_netfilter
-
-# Configuring sysctl parameters required by Kubernetes
-echo "Configuring sysctl parameters for Kubernetes..."
-sudo tee /etc/sysctl.d/kubernetes.conf <<EOF
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
+	sudo mkdir -p /var/lib/kubelet
+	cat <<EOF | sudo tee /var/lib/kubelet/config.yaml
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+cgroupDriver: systemd
 EOF
 
-# Applying sysctl settings
-echo "Applying sysctl settings..."
-sudo sysctl --system
+}
 
-# Installing prerequisites for containerd
-echo "Installing prerequisites for containerd..."
-sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
+k8s_reload_restart() {
+	sudo systemctl daemon-reload
+	sudo systemctl restart kubelet
+}
 
-# Adding Docker's official GPG key
-echo "Adding Docker's GPG key..."
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/docker.gpg
+setup_local_k8s() {
+	mkdir -p $HOME/.kube
+	sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+	sudo chown $(id -u):$(id -g) $HOME/.kube/config
+}
 
-# Adding Docker repository
-echo "Adding Docker repository..."
-sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
-# Installing containerd
-echo "Installing containerd..."
-sudo apt install -y containerd.io
+main() {
+	echo "Disabling Swap..."
+	disable_swap
 
-# Configuring containerd and restarting the service
-echo "Configuring containerd..."
-containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
-sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
-echo "Restarting containerd service..."
-sudo systemctl restart containerd
-sudo systemctl enable containerd
+	echo "Running update..."
+	sudo apt update
 
-# Adding Kubernetes GPG key
-echo "Adding Kubernetes GPG key..."
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/kubernetes-xenial.gpg
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Installing dependencies..."
+	install_dependencies
 
-# Adding Kubernetes repository
-echo "Adding Kubernetes repository..."
-sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Opening necessary ports..."
+	open_ports
 
-# Updating package listings
-echo "Updating package listings..."
-sudo apt update
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Setting up required sysctl params..."
+	config_sysctl_params
 
-# Installing Kubernetes components: kubelet, kubeadm, and kubectl
-echo "Installing Kubernetes components (kubelet, kubeadm, kubectl)..."
-sudo apt install -y kubelet kubeadm kubectl
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Installing containerd..."
+	install_containerd
 
-# Preventing these packages from being automatically updated
-echo "Marking Kubernetes packages to hold to prevent automatic updates..."
-sudo apt-mark hold kubelet kubeadm kubectl
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Cleaning up existing Kubernetes repository entries..."
+	pre_k8s_cleanup
 
-echo "Kubernetes installation complete."
-echo "Use the following command to join this node to a cluster:"
-echo "kubeadm join <master-ip>:<master-port usually 6443> --token <token> --discovery-token-ca-cert-hash <discovery token hash>"
-echo ""
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Updating signing key..."
+	update_signing_key
+
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Adding Kubernetes apt repository..."
+	add_k8s_repo
+
+	echo "Running apt-get update..."
+	sudo apt-get update
+
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Installing kubelet, kubeadm, kubectl..."
+	install_k8s
+
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Configuring kubelet cgroup driver to systemd..."
+	config_k8s
+
+	printf '=%.0s' {1..140}
+	echo ""
+	echo "Reloading and restarting kubelet..."
+	k8s_reload_restart
+	
+	
+	echo ""
+	echo "Run the following command to join this node to a cluster: "
+	echo "sudo kubeadm join <ip-address>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<token>"
+	echo ""
+	echo "Or you can retrieve the full command from the k8s master by running: "
+	echo "kubeadm token create --print-join-command"
+	echo ""
+
+}
+
+
+main
