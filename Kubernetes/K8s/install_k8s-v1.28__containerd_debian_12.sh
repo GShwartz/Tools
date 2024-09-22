@@ -236,44 +236,108 @@ monitor() {
 	done
 }
 
-check_helm() {
-	if [ "$INSTALL_HELM" = true ]; then
-		printf '=%.0s' {1..140}
-		echo
-		echo "Installing Helm..."
+install_helm() {
+	install_curl_package() {
+		sudo apt-get update
+		sudo apt-get install -y curl
+	}
+	
+	install_git_package() {
+		sudo apt-get update
+		sudo apt-get install -y git
+	}
+	
+    local reason=""
+    local helm_install_script_url="https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3"
+    local helm_install_script="get_helm.sh"
 
-		# Download and install Helm
-		curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
-
-		# Verify Helm installation
-		helm version
-		echo
-		echo "Helm installation completed."
-
-	else
-		# Ask the user if they want to install Helm
-		printf '=%.0s' {1..140}
-		echo
-		read -p "Do you want to install Helm? [y/N]: " install_helm
-
-		if [[ $install_helm =~ ^[Yy]$ ]]; then
-			printf '=%.0s' {1..140}
-			echo
-			echo "Installing Helm..."
-
-			# Download and install Helm
-			curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
-
-			# Verify Helm installation
-			helm version
-
-			printf '=%.0s' {1..140}
-			echo
-			echo "Helm installation completed."
-		else
-			echo "Skipping Helm installation."
-		fi
+    printf '=%.0s' {1..140}
+    echo
+    echo "Installing Helm..."
+	if ! command -v curl >/dev/null 2>&1; then
+		echo "curl is not installed. Installing curl..."
+		install_curl_package
+		
 	fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        echo "Git is not installed. Installing Git..."
+        install_git_package
+		
+    fi
+
+    if curl -fsSL -o "$helm_install_script" "$helm_install_script_url"; then
+        chmod +x "$helm_install_script"
+
+        if ./"$helm_install_script"; then
+            if helm version >/dev/null 2>&1; then
+                printf '=%.0s' {1..140}
+                echo "HELM Version:"
+				helm version
+				
+                echo "Helm installation completed."
+                reason="Helm installation succeeded."
+                echo "$reason"
+				
+                rm -f "$helm_install_script"
+                return 0
+				
+            else
+                reason="Helm installation failed during verification."
+                echo "$reason"
+                rm -f "$helm_install_script"
+                return 1
+				
+            fi
+			
+        else
+            reason="Helm installation script failed to execute."
+            echo "$reason"
+            rm -f "$helm_install_script"
+            return 1
+			
+        fi
+		
+    else
+        reason="Helm installation script failed to download."
+        echo "$reason"
+        return 1
+		
+    fi
+}
+
+check_helm() {
+    local reason=""
+
+    if helm version >/dev/null 2>&1; then
+        reason="Helm is already installed."
+        echo "$reason"
+        return 0
+		
+    fi
+
+    if [ "$INSTALL_HELM" = true ]; then
+		echo "Installing HELM..."
+        install_helm
+        return $?
+		
+    else
+        printf '=%.0s' {1..140}
+        echo ""
+        read -p "Do you want to install Helm? [y/N]: " install_choice
+
+        if [[ $install_choice =~ ^[Yy]$ ]]; then
+            # User chose to install Helm
+            install_helm
+            return $?
+			
+        else
+            reason="User chose to skip Helm installation."
+            echo "$reason"
+            return 2
+			
+        fi
+    fi
 }
 
 
@@ -285,37 +349,37 @@ main() {
 	sudo apt update
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Installing dependencies..."
 	install_dependencies
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Opening necessary ports..."
 	open_ports
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Setting up required sysctl params..."
 	config_sysctl_params
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Installing containerd..."
 	install_containerd
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Cleaning up existing Kubernetes repository entries..."
 	pre_k8s_cleanup
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Updating signing key..."
 	update_signing_key
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Adding Kubernetes apt repository..."
 	add_k8s_repo
 
@@ -323,46 +387,64 @@ main() {
 	sudo apt-get update
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Installing kubelet, kubeadm, kubectl..."
 	install_k8s
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Configuring kubelet cgroup driver to systemd..."
 	config_k8s
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Reloading and restarting kubelet..."
 	k8s_reload_restart
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Initializing Kubernetes cluster with kubeadm..."
 	init_k8s_cluster
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Setting up local kubeconfig..."
 	setup_local_k8s
 
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Applying Calico network plugin..."
 	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
 	
 	monitor
 	
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	kubectl get pods -n kube-system
 	kubectl get nodes
 	
-	check_helm
+	printf '=%.0s' {1..140}
+	echo ""
+	check_helm_output=$(check_helm)
+	check_helm_status=$?
+
+	if [ $check_helm_status -eq 0 ]; then
+		echo "Helm was successfully installed."
+		
+	else
+		echo "$check_helm_output"
+		if [ $check_helm_status -eq 2 ]; then
+			echo "Helm installation was skipped by the user."
+		
+		else
+			echo "Helm installation failed."
+		
+		fi
+		
+	fi
 	
 	printf '=%.0s' {1..140}
-	echo
+	echo ""
 	echo "Use the following command to create new joining commands:"
 	echo "kubeadm token create --print-join-command"
 	echo ""
