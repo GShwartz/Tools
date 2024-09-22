@@ -110,82 +110,81 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# Updating system packages
-printf '=%.0s' {1..140}
-echo
-echo "Updating system packages..."
-sudo apt update
-
-# Disabling swap and updating system settings for Kubernetes
-printf '=%.0s' {1..140}
-echo
-echo "Disabling swap and updating system settings for Kubernetes..."
+echo "Disabling Swap..."
 sudo swapoff -a
-sudo sed -i '$ d' /etc/fstab
 
-# Setting up modules for containerd
-printf '=%.0s' {1..140}
-echo
-echo "Setting up modules for containerd..."
-sudo tee /etc/modules-load.d/containerd.conf <<EOF
-overlay
-br_netfilter
-EOF
+echo "Commenting swap line in /etc/fstab..."
+sudo sed -i '/ swap / s/^/# /' /etc/fstab
 
-sudo modprobe overlay
-sudo modprobe br_netfilter
-
-# Configuring network settings for Kubernetes
-printf '=%.0s' {1..140}
-echo
-echo "Configuring network settings for Kubernetes..."
-sudo tee /etc/sysctl.d/kubernetes.conf <<EOF
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
-EOF
-
-sudo sysctl --system
-
-# Installing containerd
-printf '=%.0s' {1..140}
-echo
-echo "Installing containerd..."
-sudo apt install -y curl gnupg2 software-properties-common apt-transport-https ca-certificates
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/docker.gpg
-
-# Add docker repo
-sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-
-sudo apt install -y containerd.io
-containerd config default | sudo tee /etc/containerd/config.toml >/dev/null 2>&1
-sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
-sudo systemctl restart containerd
-sudo systemctl enable containerd
-
-# Installing Kubernetes components
-printf '=%.0s' {1..140}
-echo
-echo "Installing Kubernetes components (kubeadm, kubelet, kubectl)..."
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/kubernetes-xenial.gpg
-
-# Add k8s repo
-sudo DEBIAN_FRONTEND=noninteractive add-apt-repository -y "deb http://apt.kubernetes.io/ kubernetes-xenial main"
-
+echo "Running update..."
 sudo apt update
-sudo apt install -y kubelet kubeadm kubectl
+
+echo "Installing dependencies..."
+sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release
+
+echo "Opening ports..."
+sudo ufw allow 6443/tcp
+sudo ufw allow 2379:2380/tcp
+sudo ufw allow 10250/tcp
+sudo ufw allow 10259/tcp
+sudo ufw allow 10257/tcp
+
+echo "Installing docker.io..."
+sudo apt install -y docker.io
+
+echo "Configuring docker daemon to use systemd..."
+cat <<EOF | sudo tee /etc/docker/daemon.json
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+
+echo "Enabling docker..."
+sudo systemctl enable docker
+
+echo "Reloading docker daemon..."
+sudo systemctl daemon-reload
+
+echo "Restarting docker..."
+sudo systemctl restart docker
+
+# Clean up existing Kubernetes repository entries
+echo "Cleaning up existing Kubernetes repository entries..."
+sudo rm -f /etc/apt/sources.list.d/kubernetes.list
+sudo rm -f /etc/apt/sources.list.d/google-cloud-sdk.list
+sudo rm -f /etc/apt/sources.list.d/kubernetes.list.save
+sudo sed -i '/kubernetes/d' /etc/apt/sources.list
+sudo sed -i '/packages.cloud.google.com/d' /etc/apt/sources.list
+
+echo "Updating signing key..."
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+echo "Adding Kubernetes apt repository..."
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+echo "Running apt-get update..."
+sudo apt-get update
+
+echo "Installing kubelet, kubeadm, kubectl..."
+sudo apt-get install -y kubelet kubeadm kubectl
+
+echo "Locking current version of kubelet, kubeadm, kubectl..."
 sudo apt-mark hold kubelet kubeadm kubectl
 
-# Initializing Kubernetes cluster
-printf '=%.0s' {1..140}
-echo
-echo "Initializing Kubernetes cluster..."
-sudo kubeadm init
+echo "Enabling and starting kubelet service..."
+sudo systemctl enable --now kubelet
 
-# Configuring kubectl for the user
-printf '=%.0s' {1..140}
-echo
-echo "Configuring kubectl for the user..."
+# Proper Init
+echo "Initializing Kubernetes cluster with kubeadm..."
+sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --pod-network-cidr=192.168.100.0/24
+
+echo "Setting up local kubeconfig..."
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
