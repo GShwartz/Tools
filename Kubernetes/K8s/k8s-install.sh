@@ -3,7 +3,6 @@
 # Set script env default args
 INSTALL_HELM=false
 
-
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo
@@ -99,7 +98,6 @@ spin() {
     done
 }
 
-
 # Process script arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -120,53 +118,56 @@ echo "Running update..."
 sudo apt update
 
 echo "Installing dependencies..."
-sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release
+sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release socat conntrack
 
-echo "Opening ports..."
-sudo ufw allow 6443/tcp
-sudo ufw allow 2379:2380/tcp
-sudo ufw allow 10250/tcp
-sudo ufw allow 10259/tcp
-sudo ufw allow 10257/tcp
+echo "Opening necessary ports..."
+sudo ufw allow 6443/tcp   # Kubernetes API server
+sudo ufw allow 2379:2380/tcp  # etcd server client API
+sudo ufw allow 10250/tcp  # Kubelet API
+sudo ufw allow 10259/tcp  # kube-scheduler
+sudo ufw allow 10257/tcp  # kube-controller-manager
 
-echo "Installing docker.io..."
-sudo apt install -y docker.io
+echo "Loading necessary kernel modules..."
+sudo modprobe overlay
+sudo modprobe br_netfilter
 
-echo "Configuring docker daemon to use systemd..."
-cat <<EOF | sudo tee /etc/docker/daemon.json
-{
-  "exec-opts": ["native.cgroupdriver=systemd"],
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "100m"
-  },
-  "storage-driver": "overlay2"
-}
+echo "Setting up required sysctl params..."
+sudo tee /etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.ipv4.ip_forward                 = 1
 EOF
 
-echo "Enabling docker..."
-sudo systemctl enable docker
+echo "Applying sysctl params..."
+sudo sysctl --system
 
-echo "Reloading docker daemon..."
-sudo systemctl daemon-reload
+# Install containerd
+echo "Installing containerd..."
+sudo apt install -y containerd
 
-echo "Restarting docker..."
-sudo systemctl restart docker
+echo "Configuring containerd..."
+sudo mkdir -p /etc/containerd
+sudo containerd config default | sudo tee /etc/containerd/config.toml
+
+echo "Setting cgroup driver to systemd in containerd config..."
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+echo "Restarting containerd..."
+sudo systemctl restart containerd
+sudo systemctl enable containerd
 
 # Clean up existing Kubernetes repository entries
 echo "Cleaning up existing Kubernetes repository entries..."
 sudo rm -f /etc/apt/sources.list.d/kubernetes.list
 sudo rm -f /etc/apt/sources.list.d/google-cloud-sdk.list
-sudo rm -f /etc/apt/sources.list.d/kubernetes.list.save
 sudo sed -i '/kubernetes/d' /etc/apt/sources.list
 sudo sed -i '/packages.cloud.google.com/d' /etc/apt/sources.list
 
 echo "Updating signing key..."
 sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
 echo "Adding Kubernetes apt repository..."
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
 echo "Running apt-get update..."
 sudo apt-get update
@@ -180,9 +181,29 @@ sudo apt-mark hold kubelet kubeadm kubectl
 echo "Enabling and starting kubelet service..."
 sudo systemctl enable --now kubelet
 
-# Proper Init
+# Configure kubelet cgroup driver to systemd
+echo "Configuring kubelet cgroup driver to systemd..."
+sudo mkdir -p /etc/systemd/system/kubelet.service.d
+cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
+[Service]
+Environment="KUBELET_EXTRA_ARGS=--container-runtime=remote --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
+EOF
+
+sudo mkdir -p /var/lib/kubelet
+cat <<EOF | sudo tee /var/lib/kubelet/config.yaml
+kind: KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+cgroupDriver: systemd
+EOF
+
+echo "Reloading and restarting kubelet..."
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+
+# Initialize Kubernetes cluster
 echo "Initializing Kubernetes cluster with kubeadm..."
-sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') --pod-network-cidr=192.168.100.0/24
+sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') \
+--pod-network-cidr=192.168.0.0/16
 
 echo "Setting up local kubeconfig..."
 mkdir -p $HOME/.kube
@@ -193,30 +214,28 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 printf '=%.0s' {1..140}
 echo
 echo "Applying Calico network plugin..."
-#kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
-
 
 # Main loop to check readiness with spinning animation
 while true; do
     if are_all_nodes_ready && are_all_system_pods_ready; then
-		# Kill the spinner process
-        kill $SPIN_PID 2>/dev/null  
-		
-		echo ""
+        # Kill the spinner process
+        kill $SPIN_PID 2>/dev/null
+
+        echo ""
         echo "All nodes and system pods are ready."
         echo ""
-        
-		break
+
+        break
     else
         # Start spinner in the background and get its process ID
         spin "Waiting for nodes and system pods to become ready..." &
         SPIN_PID=$!
-		
+
         sleep 5
-		
-		# Kill the spinner process to restart it
-        kill $SPIN_PID 2>/dev/null  
+
+        # Kill the spinner process to restart it
+        kill $SPIN_PID 2>/dev/null
     fi
 done
 
@@ -230,26 +249,26 @@ if [ "$INSTALL_HELM" = true ]; then
     printf '=%.0s' {1..140}
     echo
     echo "Installing Helm..."
-    
+
     # Download and install Helm
     curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
 
     # Verify Helm installation
     helm version
-	echo
+    echo
     echo "Helm installation completed."
-	
+
 else
     # Ask the user if they want to install Helm
-	printf '=%.0s' {1..140}
+    printf '=%.0s' {1..140}
     echo
     read -p "Do you want to install Helm? [y/N]: " install_helm
-    
+
     if [[ $install_helm =~ ^[Yy]$ ]]; then
         printf '=%.0s' {1..140}
         echo
         echo "Installing Helm..."
-        
+
         # Download and install Helm
         curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
 
