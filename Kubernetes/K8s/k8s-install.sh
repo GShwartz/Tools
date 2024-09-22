@@ -193,7 +193,9 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 printf '=%.0s' {1..140}
 echo
 echo "Applying Calico network plugin..."
-kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+#kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/calico.yaml
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
+
 
 # Main loop to check readiness with spinning animation
 while true; do
