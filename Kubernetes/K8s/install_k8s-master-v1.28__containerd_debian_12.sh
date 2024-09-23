@@ -1,102 +1,30 @@
 #!/bin/bash
 
 INSTALL_HELM=false
+HELM_ONLY=false
 
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo
     echo "Options:"
     echo "  --install-helm      Automatically install Helm after setting up the Kubernetes cluster."
+    echo "  --helm-only         Only install Helm, skip Kubernetes setup."
     echo "  --help              Display this help message."
     echo
     echo "Description:"
     echo "  This script sets up a Kubernetes cluster, initializes it with kubeadm,"
     echo "  configures kubectl for the user, and applies the Calico network plugin."
     echo "  Optionally, it can also install Helm based on user input or the --install-helm flag."
+    echo "  The --helm-only flag skips Kubernetes setup and only installs Helm."
 }
 
-are_all_nodes_ready() {
-    local max_retries=5
-    local retry_delay=10
-    local attempt=1
-
-    while [ $attempt -le $max_retries ]; do
-        local nodes=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}')
-        if [ -z "$nodes" ]; then
-            echo "Attempt $attempt/$max_retries failed: Unable to get nodes status."
-            attempt=$((attempt+1))
-            sleep $retry_delay
-        else
-            local all_ready=true
-            for status in $nodes; do
-                if [ "$status" != "Ready" ]; then
-                    all_ready=false
-                    break
-                fi
-            done
-
-            if [ "$all_ready" = true ]; then
-                return 0
-            fi
-
-            # Start spinner in the background and get its process ID
-            spin "Nodes not ready. Waiting..." &
-            SPIN_PID=$!
-            sleep $retry_delay
-            kill $SPIN_PID 2>/dev/null
-        fi
-    done
-
-    echo "Failed to get all nodes in Ready status after $max_retries attempts."
-    return 1
-}
-
-are_all_system_pods_ready() {
-    local max_retries=5
-    local retry_delay=10
-    local attempt=1
-
-    while [ $attempt -le $max_retries ]; do
-        local pods=$(kubectl get pods --namespace kube-system --no-headers 2>/dev/null)
-        if [ -z "$pods" ]; then
-            echo "Attempt $attempt/$max_retries failed: Unable to get kube-system pods."
-            attempt=$((attempt+1))
-            sleep $retry_delay
-        else
-            local all_running=true
-            echo "$pods" | awk '{split($2, a, "/"); if (a[1] != a[2] || $3 != "Running") exit 1}' || all_running=false
-
-            if [ "$all_running" = true ]; then
-                return 0
-            fi
-
-            # Start spinner in the background and get its process ID
-            spin "Some kube-system pods are not running. Waiting..." &
-            SPIN_PID=$!
-            sleep $retry_delay
-            kill $SPIN_PID 2>/dev/null
-        fi
-    done
-
-    echo "Failed to get all kube-system pods in Running status after $max_retries attempts."
-    return 1
-}
-
-spin() {
-    spinner="/-\|"
-    while :
-    do
-        for i in `seq 0 3`
-        do
-            echo -ne "\r${spinner:i:1} $1"
-            sleep 0.1
-        done
-    done
-}
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --install-helm) INSTALL_HELM=true ;;
+        --install-helm) 
+			INSTALL_HELM=true
+			;;
+        --helm-only) HELM_ONLY=true ;;
         --help) show_help; exit 0 ;;
         *) echo "Unknown parameter passed: $1"; show_help; exit 1 ;;
     esac
@@ -116,11 +44,11 @@ install_dependencies() {
 }
 
 open_ports() {
-	sudo ufw allow 6443/tcp   # Kubernetes API server
-	sudo ufw allow 2379:2380/tcp  # etcd server client API
-	sudo ufw allow 10250/tcp  # Kubelet API
-	sudo ufw allow 10259/tcp  # kube-scheduler
-	sudo ufw allow 10257/tcp  # kube-controller-manager
+	sudo ufw allow 6443/tcp   		# Kubernetes API server
+	sudo ufw allow 2379:2380/tcp  	# etcd server client API
+	sudo ufw allow 10250/tcp  		# Kubelet API
+	sudo ufw allow 10259/tcp  		# kube-scheduler
+	sudo ufw allow 10257/tcp  		# kube-controller-manager
 }
 
 config_sysctl_params() {
@@ -202,13 +130,92 @@ k8s_reload_restart() {
 
 init_k8s_cluster() {
 	sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') \
-	--pod-network-cidr=192.168.0.0/16
+	--pod-network-cidr=192.168.100.0/16
 }
 
 setup_local_k8s() {
 	mkdir -p $HOME/.kube
 	sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 	sudo chown $(id -u):$(id -g) $HOME/.kube/config
+}
+
+are_all_nodes_ready() {
+    local max_retries=5
+    local retry_delay=10
+    local attempt=1
+
+    while [ $attempt -le $max_retries ]; do
+        local nodes=$(kubectl get nodes --no-headers 2>/dev/null | awk '{print $2}')
+        if [ -z "$nodes" ]; then
+            echo "Attempt $attempt/$max_retries failed: Unable to get nodes status."
+            attempt=$((attempt+1))
+            sleep $retry_delay
+        else
+            local all_ready=true
+            for status in $nodes; do
+                if [ "$status" != "Ready" ]; then
+                    all_ready=false
+                    break
+                fi
+            done
+
+            if [ "$all_ready" = true ]; then
+                return 0
+            fi
+
+            # Start spinner in the background and get its process ID
+            spin "Nodes not ready. Waiting..." &
+            SPIN_PID=$!
+            sleep $retry_delay
+            kill $SPIN_PID 2>/dev/null
+        fi
+    done
+
+    echo "Failed to get all nodes in Ready status after $max_retries attempts."
+    return 1
+}
+
+are_all_system_pods_ready() {
+    local max_retries=5
+    local retry_delay=10
+    local attempt=1
+
+    while [ $attempt -le $max_retries ]; do
+        local pods=$(kubectl get pods --namespace kube-system --no-headers 2>/dev/null)
+        if [ -z "$pods" ]; then
+            echo "Attempt $attempt/$max_retries failed: Unable to get kube-system pods."
+            attempt=$((attempt+1))
+            sleep $retry_delay
+        else
+            local all_running=true
+            echo "$pods" | awk '{split($2, a, "/"); if (a[1] != a[2] || $3 != "Running") exit 1}' || all_running=false
+
+            if [ "$all_running" = true ]; then
+                return 0
+            fi
+
+            # Start spinner in the background and get its process ID
+            spin "Some kube-system pods are not running. Waiting..." &
+            SPIN_PID=$!
+            sleep $retry_delay
+            kill $SPIN_PID 2>/dev/null
+        fi
+    done
+
+    echo "Failed to get all kube-system pods in Running status after $max_retries attempts."
+    return 1
+}
+
+spin() {
+    spinner="/-\|"
+    while :
+    do
+        for i in `seq 0 3`
+        do
+            echo -ne "\r${spinner:i:1} $1"
+            sleep 0.1
+        done
+    done
 }
 
 monitor() {
@@ -317,31 +324,33 @@ check_helm() {
     fi
 
     if [ "$INSTALL_HELM" = true ]; then
-		echo "Installing HELM..."
         install_helm
         return $?
 		
     else
-        printf '=%.0s' {1..140}
-        echo ""
-        read -p "Do you want to install Helm? [y/N]: " install_choice
-
-        if [[ $install_choice =~ ^[Yy]$ ]]; then
-            # User chose to install Helm
-            install_helm
-            return $?
-			
-        else
-            reason="User chose to skip Helm installation."
-            echo "$reason"
-            return 2
-			
-        fi
+		return 2
+        
     fi
 }
 
 
 main() {
+	if [ "$HELM_ONLY" = true ]; then
+		echo "HELM_ONLY flag is set. Skipping Kubernetes setup and only installing Helm."
+		install_helm
+		helm_install_status=$?
+
+		if [ $helm_install_status -eq 0 ]; then
+			echo "Helm was successfully installed."
+			
+		else
+			echo "Helm installation failed."
+			
+		fi
+
+		exit $helm_install_status
+	fi
+
 	echo "Disabling Swap..."
 	disable_swap
 
@@ -420,8 +429,12 @@ main() {
 	
 	printf '=%.0s' {1..140}
 	echo ""
-	kubectl get pods -n kube-system
+	echo "CURRENT NODES >> "
 	kubectl get nodes
+	echo ""
+	
+	echo "CURRENT PODS >> "
+	kubectl get pods -n kube-system
 	
 	printf '=%.0s' {1..140}
 	echo ""
@@ -447,7 +460,6 @@ main() {
 	echo ""
 	echo "Use the following command to create new joining commands:"
 	echo "kubeadm token create --print-join-command"
-	echo ""
 }
 
 
