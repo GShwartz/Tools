@@ -1,5 +1,26 @@
 #!/bin/bash
 
+#
+#	Machine Pre Setup:
+#		Hardware: 
+#			Min 2 CPU, 4GB RAM
+#		
+#		Software:
+#			curl, sudo - set no passwd for user & usermod to sudo group
+#		
+#	TODO:
+#		1. If the machine will be a CI/CD agent:
+#			- add current user to sudo group:
+#				sudo usermod -aG sudo $(whoami)
+#			
+#			- use visudo to remove the need for sudo password:
+#				username	ALL=(ALL) NOPASSWD:ALL
+#				
+#			- Install git docker-ce
+#			- start docker service
+#
+
+
 INSTALL_HELM=false
 HELM_ONLY=false
 
@@ -32,6 +53,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 disable_swap() {
+	echo "Disabling Swap..."
 	sudo swapoff -a
 
 	echo "Commenting swap line in /etc/fstab..."
@@ -39,11 +61,16 @@ disable_swap() {
 }
 
 install_dependencies() {
-	sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release socat conntrack
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Installing dependencies..."
+	sudo apt update && sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release socat conntrack
 
 }
 
 open_ports() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Opening necessary ports..."
+	
 	sudo ufw allow 6443/tcp   		# Kubernetes API server
 	sudo ufw allow 2379:2380/tcp  	# etcd server client API
 	sudo ufw allow 10250/tcp  		# Kubelet API
@@ -52,6 +79,7 @@ open_ports() {
 }
 
 config_sysctl_params() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Config_Sysctl_Params: Loading necessary kernel modules..."
 
 	sudo modprobe overlay
@@ -67,6 +95,9 @@ EOF
 }
 
 install_containerd() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Installing containerd..."
+	
 	sudo apt install -y containerd
 
 	echo "Configuring containerd..."
@@ -82,6 +113,9 @@ install_containerd() {
 }
 
 pre_k8s_cleanup() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Cleaning up existing Kubernetes repository entries..."
+	
 	sudo rm -f /etc/apt/sources.list.d/kubernetes.list
 	sudo rm -f /etc/apt/sources.list.d/google-cloud-sdk.list
 	sudo sed -i '/kubernetes/d' /etc/apt/sources.list
@@ -89,15 +123,25 @@ pre_k8s_cleanup() {
 }
 
 update_signing_key() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Updating signing key..."
+	
 	sudo mkdir -p /etc/apt/keyrings
 	curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 }
 
 add_k8s_repo() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Adding Kubernetes apt repository..."
+	
 	echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 }
 
 install_k8s() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Installing kubelet, kubeadm, kubectl..."
+	
+	sudo apt-get update
 	sudo apt-get install -y kubelet kubeadm kubectl
 
 	echo "Install_K8s: Locking current version of kubelet, kubeadm, kubectl..."
@@ -108,6 +152,9 @@ install_k8s() {
 }
 
 config_k8s() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Configuring kubelet cgroup driver to systemd..."
+	
 	sudo mkdir -p /etc/systemd/system/kubelet.service.d
 	cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf
 [Service]
@@ -129,20 +176,54 @@ EOF
 }
 
 k8s_reload_restart() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Reloading and restarting kubelet..."
+	
 	sudo systemctl daemon-reload
 	sudo systemctl restart kubelet
 }
 
 init_k8s_cluster() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Initializing Kubernetes cluster with kubeadm..."
+	
 	sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') \
 	--pod-network-cidr=192.168.100.0/16
 }
 
 setup_local_k8s() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Setting up local kubeconfig..."
+	
 	mkdir -p $HOME/.kube
 	sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 	sudo chown $(id -u):$(id -g) $HOME/.kube/config
 }
+
+apply_calico() {
+	if [ "$1" == "silent" ]; then
+		echo -e "\n$(printf '=%.0s' {1..140})\n"
+		echo "Applying Calico network plugin [Round 2]..."
+		kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml > /dev/null
+	
+	else
+		echo -e "\n$(printf '=%.0s' {1..140})\n"
+		echo "Applying Calico network plugin [Round 1]..."
+		kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
+	
+	fi
+}
+
+display_pods_and_nodes() {
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "CURRENT NODES >> "
+	kubectl get nodes
+	echo ""
+	
+	echo "CURRENT PODS >> "
+	kubectl get pods -n kube-system
+}
+
 
 are_all_nodes_ready() {
     local max_retries=5
@@ -356,79 +437,24 @@ main() {
 		exit $helm_install_status
 	fi
 
-	echo "Disabling Swap..."
 	disable_swap
-
-	echo "Running update..."
-	sudo apt update
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Installing dependencies..."
 	install_dependencies
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Opening necessary ports..."
 	open_ports
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Setting up required sysctl params..."
 	config_sysctl_params
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Installing containerd..."
 	install_containerd
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Cleaning up existing Kubernetes repository entries..."
 	pre_k8s_cleanup
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Updating signing key..."
 	update_signing_key
-
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Adding Kubernetes apt repository..."
 	add_k8s_repo
-
-	echo "Running apt-get update..."
-	sudo apt-get update
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Installing kubelet, kubeadm, kubectl..."
 	install_k8s
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Configuring kubelet cgroup driver to systemd..."
 	config_k8s
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Reloading and restarting kubelet..."
 	k8s_reload_restart
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Initializing Kubernetes cluster with kubeadm..."
 	init_k8s_cluster
-
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Setting up local kubeconfig..."
 	setup_local_k8s
-
-	echo "Applying Calico network plugin [Round 1]..."
-	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
-	
+	apply_calico
 	monitor
+	display_pods_and_nodes
+	apply_calico "silent"
 	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "CURRENT NODES >> "
-	kubectl get nodes
-	echo ""
-	
-	echo "CURRENT PODS >> "
-	kubectl get pods -n kube-system
-	
-	echo -e "\n$(printf '=%.0s' {1..140})\n"
-	echo "Applying Calico network plugin [Round 2]..."
-	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml > /dev/null
 	
 	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	check_helm_output=$(check_helm)
@@ -456,8 +482,6 @@ main() {
 	echo "If you want to install helm in a later stage you can run:"
 	echo "$0 --helm-only"
 	echo ""
-	echo ""
-	
 }
 
 
