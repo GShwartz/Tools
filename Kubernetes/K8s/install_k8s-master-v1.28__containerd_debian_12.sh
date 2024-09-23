@@ -120,6 +120,11 @@ kind: KubeletConfiguration
 apiVersion: kubelet.config.k8s.io/v1beta1
 cgroupDriver: systemd
 EOF
+	
+	echo "config_k8s: Configuring newer version to 'pause'..."
+	sudo sed -i 's/sandbox_image = "registry\.k8s\.io\/pause:.*"/sandbox_image = "registry.k8s.io\/pause:3.9"/' /etc/containerd/config.toml
+	sudo systemctl restart containerd
+	grep "sandbox_image" /etc/containerd/config.toml
 
 }
 
@@ -356,79 +361,64 @@ main() {
 
 	echo "Running update..."
 	sudo apt update
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Installing dependencies..."
 	install_dependencies
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Opening necessary ports..."
 	open_ports
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Setting up required sysctl params..."
 	config_sysctl_params
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Installing containerd..."
 	install_containerd
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Cleaning up existing Kubernetes repository entries..."
 	pre_k8s_cleanup
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Updating signing key..."
 	update_signing_key
 
-	printf '=%.0s' {1..140}
-	echo ""
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Adding Kubernetes apt repository..."
 	add_k8s_repo
 
 	echo "Running apt-get update..."
 	sudo apt-get update
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Installing kubelet, kubeadm, kubectl..."
 	install_k8s
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Configuring kubelet cgroup driver to systemd..."
 	config_k8s
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Reloading and restarting kubelet..."
 	k8s_reload_restart
-
-	printf '=%.0s' {1..140}
-	echo ""
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Initializing Kubernetes cluster with kubeadm..."
 	init_k8s_cluster
 
-	printf '=%.0s' {1..140}
-	echo ""
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Setting up local kubeconfig..."
 	setup_local_k8s
 
-	printf '=%.0s' {1..140}
-	echo ""
-	echo "Applying Calico network plugin..."
+	echo "Applying Calico network plugin [Round 1]..."
 	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml
 	
 	monitor
 	
-	printf '=%.0s' {1..140}
-	echo ""
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "CURRENT NODES >> "
 	kubectl get nodes
 	echo ""
@@ -436,11 +426,14 @@ main() {
 	echo "CURRENT PODS >> "
 	kubectl get pods -n kube-system
 	
-	printf '=%.0s' {1..140}
-	echo ""
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
+	echo "Applying Calico network plugin [Round 2]..."
+	kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/calico.yaml > /dev/null
+	
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	check_helm_output=$(check_helm)
 	check_helm_status=$?
-
+		
 	if [ $check_helm_status -eq 0 ]; then
 		echo "Helm was successfully installed."
 		
@@ -456,10 +449,15 @@ main() {
 		
 	fi
 	
-	printf '=%.0s' {1..140}
-	echo ""
+	echo -e "\n$(printf '=%.0s' {1..140})\n"
 	echo "Use the following command to create new joining commands:"
 	echo "kubeadm token create --print-join-command"
+	echo ""
+	echo "If you want to install helm in a later stage you can run:"
+	echo "$0 --helm-only"
+	echo ""
+	echo ""
+	
 }
 
 
