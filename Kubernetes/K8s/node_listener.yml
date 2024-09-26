@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: auto-label-worker-nodes
+  namespace: gil-namespace
+spec:
+  schedule: "*/1 * * * *"  # Runs every minute
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: label-nodes
+            image: bitnami/kubectl:latest
+            command: ["/bin/bash", "-c"]
+            args:
+              - |
+                for node in $(sudo kubectl get nodes --no-headers | awk '{print $1}'); do
+                  if [[ $(sudo kubectl get node $node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/master}') != "true" ]]; then
+                    if [[ $(sudo kubectl get node $node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/worker}') == "" ]]; then
+                      sudo kubectl label node $node node-role.kubernetes.io/worker=
+                      echo "Labeled node $node as worker."
+                    fi
+                  fi
+                done
+          restartPolicy: OnFailure
