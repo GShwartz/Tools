@@ -1,25 +1,62 @@
 #!/bin/bash
 
+
 if [ "$EUID" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
 INSTALL_HELM=false
 HELM_ONLY=false
+APISERVER_ADVERTISE_ADDRESS=""
+POD_NETWORK_CIDR=""
 
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo
     echo "Options:"
-    echo "  -wh, --with-helm         Automatically install Helm after setting up the Kubernetes cluster."
-    echo "  -oh, --only-helm         Only install Helm, skip Kubernetes setup."
-    echo "  -h, --help              Display this help message."
+    echo "  -wh, --with-helm                 			Automatically install Helm after setting up the Kubernetes cluster."
+    echo "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup."
+    echo "  -aa, --apiserver-advertise-address [IP]  	Specify the IP address for the Kubernetes API server."
+    echo "  -h, --help                       			Display this help message."
     echo
     echo "Description:"
     echo "  This script sets up a Kubernetes cluster, initializes it with kubeadm,"
     echo "  configures kubectl for the user, and applies the Calico network plugin."
     echo "  Optionally, it can also install Helm based on user input or the --with-helm flag."
-    echo "  The --helm-only flag skips Kubernetes setup and only installs Helm."
+    echo "  The --only-helm flag skips Kubernetes setup and only installs Helm."
+    echo "  You can specify the API server's IP address, and the pod network CIDR will be"
+    echo "  automatically generated based on that IP."
+}
+
+validate_ip() {
+    local ip="$1"
+    IFS='.' read -r -a octets <<< "$ip"
+    
+    # Check if there are exactly 4 octets
+    if [[ ${#octets[@]} -ne 4 ]]; then
+        echo "Error: Invalid IP address format."
+        exit 1
+    fi
+    
+    # Validate each octet is a number and within the valid range (0-255)
+    for i in "${!octets[@]}"; do
+        if ! [[ "${octets[$i]}" =~ ^[0-9]+$ ]] || [[ "${octets[$i]}" -lt 0 ]] || [[ "${octets[$i]}" -gt 255 ]]; then
+            echo "Error: Invalid IP address. Each octet must be between 0 and 255."
+            exit 1
+        fi
+    done
+
+    # Ensure last octet is neither 0 nor above 255
+    if [[ "${octets[3]}" -eq 0 ]] || [[ "${octets[3]}" -gt 255 ]]; then
+        echo "Error: Invalid IP address. The last octet cannot be 0 or greater than 254."
+        exit 1
+    fi
+}
+
+calculate_cidr() {
+    local ip="$1"
+    IFS='.' read -r -a octets <<< "$ip"
+    POD_NETWORK_CIDR="${octets[0]}.${octets[1]}.${octets[2]}.0/24"
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -30,6 +67,13 @@ while [[ "$#" -gt 0 ]]; do
         
         -oh|--only-helm)
             HELM_ONLY=true
+            ;;
+        
+        -aa|--apiserver-advertise-address)
+            APISERVER_ADVERTISE_ADDRESS="$2"
+            validate_ip "$APISERVER_ADVERTISE_ADDRESS"
+            calculate_cidr "$APISERVER_ADVERTISE_ADDRESS"
+            shift
             ;;
         
         -h|--help)
@@ -188,8 +232,17 @@ k8s_reload_restart() {
 init_k8s_cluster() {
 	echo "[ ... ] Initializing Kubernetes cluster with kubeadm..."
 	
-	sudo kubeadm init --apiserver-advertise-address=$(hostname -I | awk '{print $1}') \
-	--pod-network-cidr=192.168.100.0/16
+    if [ -z "$APISERVER_ADVERTISE_ADDRESS" ]; then
+        APISERVER_ADVERTISE_ADDRESS=$(hostname -I | awk '{print $1}')
+		calculate_cidr $APISERVER_ADVERTISE_ADDRESS
+    fi
+
+    if [ -z "$POD_NETWORK_CIDR" ]; then
+        #POD_NETWORK_CIDR="192.168.100.0/16"
+		calculate_cidr $APISERVER_ADVERTISE_ADDRESS
+    fi
+
+    sudo kubeadm init --apiserver-advertise-address="$APISERVER_ADVERTISE_ADDRESS" --pod-network-cidr="$POD_NETWORK_CIDR"
 	
 	echo ""
 	echo -e " [\033[32m + \033[0m]  Kubernetes cluster initiated successfully."
@@ -354,13 +407,13 @@ manage_helm() {
 
 install_helm() {
     install_curl_package() {
-        sudo apt-get update
-        sudo apt-get install -y curl
+        sudo apt-get update > /dev/null 2>&1
+        sudo apt-get install -y curl > /dev/null 2>&1
     }
     
     install_git_package() {
-        sudo apt-get update
-        sudo apt-get install -y git
+        sudo apt-get update > /dev/null 2>&1
+        sudo apt-get install -y git > /dev/null 2>&1
     }
 
     local helm_install_script_url="https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3"
@@ -370,15 +423,15 @@ install_helm() {
     echo
     echo "[ ... ] Installing Helm..."
     
-    if ! command -v curl >/dev/null 2>&1; then
+    if ! command -v curl; then
         echo "[ ... ] curl is not installed. Installing curl..."
-        install_curl_package > /dev/null 2>&1
+        install_curl_package 
 		echo -e " [\033[32m + \033[0m] curl was successfully installed."
     fi
 
-    if ! command -v git >/dev/null 2>&1; then
+    if ! command -v git; then
         echo "[ ... ] git is not installed. Installing Git..."
-        install_git_package > /dev/null 2>&1
+        install_git_package
 		echo -e " [\033[32m + \033[0m] git was successfully installed."
     fi
 
