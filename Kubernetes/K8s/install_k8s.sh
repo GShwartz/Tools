@@ -26,9 +26,9 @@
 COMMENT
 
 if [ "$EUID" -ne 0 ]; then
-    exec sudo "$0" "$@"
+	exec sudo "$0" "$@"
 fi
-
+	
 SCRIPT_DIR=$(dirname "$0")
 LISTENER_NODE="$SCRIPT_DIR/node_listener.yml"
 IS_MASTER=false
@@ -181,12 +181,10 @@ disable_swap() {
     echo_message SUCCESS "Swap Disabled."
 }
 
-
 install_dependencies() {
 	echo_message INFO "Installing dependencies..."
 	sudo apt update > /dev/null 2>&1 && sudo apt install -y ufw apt-transport-https ca-certificates curl gnupg lsb-release socat conntrack > /dev/null 2>&1
 	echo_message SUCCESS "Dependencies installed successfully."
-
 }
 
 open_ports() {
@@ -659,6 +657,12 @@ manage_helm() {
     fi
 }
 
+taint_nodes() {
+	echo_message INFO "Tainting nodes..."
+	sudo kubectl taint nodes $(hostname) node-role.kubernetes.io/control-plane:NoSchedule --overwrite=true
+	echo_message SUCCESS "Nodes tainted successfully."
+}
+
 manage_worker_installation() {
     disable_swap
     install_dependencies
@@ -676,19 +680,16 @@ manage_worker_installation() {
 manage_master_installation() {
 	init_k8s_cluster
 	setup_local_k8s
-	sudo kubectl taint nodes $(hostname) node-role.kubernetes.io/control-plane:NoSchedule --overwrite=true
-
+	taint_nodes
 	apply_calico
-	
 	create_node_listener_service
 	create_node_listener
 	apply_node_listener
-	
 	monitor
 	display
 }
 
-main() {
+manage_pre_run() {
 	if [[ -f /etc/os-release ]]; then
 		. /etc/os-release
 		OS_NAME=$NAME
@@ -718,12 +719,15 @@ main() {
 		manage_helm
 	
 	fi
+}
+
+main() {
+	manage_pre_run
 	
 	if [ "$IS_MASTER" = true ]; then
 		manage_worker_installation
 		manage_master_installation
 		manage_helm
-		
 		
 		echo -e "$(printf '=%.0s' {1..100})\n"
 		printf "Use the following command to create new joining commands:\n"
