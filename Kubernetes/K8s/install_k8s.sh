@@ -1,6 +1,7 @@
 #!/bin/bash
 
 : <<'COMMENT'
+
 	Machine Pre Setup:
 		Hardware: 
 			Min 2 CPU, 4GB RAM
@@ -19,8 +20,7 @@
 			- start docker service
 			
 	TODO:
-		1. Compatability with Ubuntu 24.04 
-		2. Add logging to file
+		1. Add Rancher ???
 
 COMMENT
 
@@ -28,7 +28,8 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-
+SCRIPT_DIR=$(dirname "$0")
+LISTENER_NODE="$SCRIPT_DIR/node_listener.yml"
 IS_MASTER=false
 INSTALL_HELM=false
 HELM_ONLY=false
@@ -36,26 +37,21 @@ APISERVER_ADVERTISE_ADDRESS=""
 POD_NETWORK_CIDR=""
 
 show_help() {
-    printf "Usage: $0 [OPTIONS]"
-	printf ""
-    printf "Default setting is set to install a WORKER node."
-	printf ""
-    printf "Options:"
-    printf "  -h, --help                       			Display this help message."
-	printf "  -m, --master 						Install K8s master"
-	printf "  -w, --worker						Install K8s worker"
-    printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster."
-    printf "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup."
-    printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server."
-    printf ""
-    printf "Description:"
-    printf "  This script sets up a Kubernetes cluster, initializes it with kubeadm,"
-    printf "  configures kubectl for the user, and applies the Calico network plugin."
-    printf "  Optionally, it can also install Helm based on user input or the --with-helm flag."
-    printf "  The --only-helm flag skips Kubernetes setup and only installs Helm."
-    printf "  You can specify the API server's IP address, and the pod network CIDR will be"
-    printf "  automatically generated based on that IP."
-	printf ""
+    printf "Usage: $0 [OPTIONS]\n\n"
+    printf "Default setting is set to install a WORKER node.\n\n"
+    printf "Options:\n"
+    printf "  -h, --help                       			Display this help message.\n"
+	printf "  -m, --master 						Install K8s master\n"
+    printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster.\n"
+    printf "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup.\n"
+    printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server.\n\n"
+    printf "Description:\n"
+    printf "  This script sets up a Kubernetes cluster, initializes it with kubeadm,\n"
+    printf "  configures kubectl for the user, and applies the Calico network plugin.\n"
+    printf "  Optionally, it can also install Helm based on user input or the --with-helm flag.\n"
+    printf "  The --only-helm flag skips Kubernetes setup and only installs Helm.\n"
+    printf "  You can specify the API server's IP address, and the pod network CIDR will be\n"
+    printf "  automatically generated based on that IP.\n\n"
 }
 
 echo_message() {
@@ -64,26 +60,29 @@ echo_message() {
 
     case "$status" in
         INFO)
-            printf "[ ... ] %s\n" "$message"
+            printf "[ ... ] %s\n" "${message}"
             ;;
 		
         DEBUG)
-            printf "[ >> ] %s\n" "$message"
+            printf "[ >> ] %s\n" "${message}"
             ;;
 			
         SUCCESS)
-            printf " [\033[32m + \033[0m] %s\n" "$message"
+            printf " [\033[32m + \033[0m] %s\n" "${message}"
             ;;
 			
         ERROR)
-            printf " [\033[31m - \033[0m] %s\n" "$message"
+            printf " [\033[31m - \033[0m] %s\n" "${message}"
             ;;
 			
         *)
-            printf "%s\n" "$message"
+            printf "%s\n" "${message}"
             ;;
+			
     esac
 }
+
+
 
 validate_ip() {
     local ip="$1"
@@ -256,7 +255,6 @@ install_k8s() {
 
 config_k8s() {
 	echo_message INFO "Configuring kubelet cgroup driver to systemd..."
-	#echo "[ ... ] Configuring kubelet cgroup driver to systemd..."
 	
 	sudo mkdir -p /etc/systemd/system/kubelet.service.d
 	cat <<EOF | sudo tee /etc/systemd/system/kubelet.service.d/20-containerd.conf  > /dev/null
@@ -271,14 +269,11 @@ apiVersion: kubelet.config.k8s.io/v1beta1
 cgroupDriver: systemd
 EOF
 	
-	#echo -e " [\033[32m + \033[0m]  Kubelet cgroup driver configured."
 	echo_message SUCCESS "Kubelet cgroup driver configured."
 	
-	#echo "[ ... ] Configuring newer version to 'pause'..."
 	echo_message INFO "Configuring newer version to 'pause'..."
 	sudo sed -i 's/sandbox_image = "registry\.k8s\.io\/pause:.*"/sandbox_image = "registry.k8s.io\/pause:3.9"/' /etc/containerd/config.toml > /dev/null
 	sudo systemctl restart containerd
-	#echo -e " [\033[32m + \033[0m]  Configured newer version to 'pause'."
 	echo_message SUCCESS "Configured newer version to 'pause'."
 
 }
@@ -418,26 +413,110 @@ spin() {
 monitor() {
 	while true; do
 		if are_all_nodes_ready && are_all_system_pods_ready; then
-			# Kill the spinner process
 			kill $SPIN_PID 2>/dev/null
 
-			echo ""
+			printf "\n"
 			echo_message SUCCESS "All nodes and system pods are ready."
-			echo ""
+			printf "\n"
 
 			break
 			
 		else
-			# Start spinner in the background and get its process ID
 			spin "Waiting for nodes and system pods to become ready..." &
 			SPIN_PID=$!
 
 			sleep 5
 
-			# Kill the spinner process to restart it
 			kill $SPIN_PID 2>/dev/null
 		fi
 	done
+}
+
+create_node_listener_service() {
+	echo_message INFO "Creating node listener service..."
+	cat <<EOF | sudo kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-labeler-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-labeler-clusterrole
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-labeler-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: node-labeler-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: node-labeler-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+EOF
+
+	echo_message INFO "Service created successfully."
+}
+
+create_node_listener() {
+    echo_message INFO "Creating a node listener ConfigMap file..."
+    cat <<EOF > $LISTENER_NODE
+apiVersion: v1
+kind: Pod
+metadata:
+  name: node-labeler
+  namespace: default
+spec:
+  serviceAccountName: node-labeler-sa  # <-- Ensure the ServiceAccount is properly used
+  tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"  # Tolerate control-plane taint
+  containers:
+  - name: label-nodes
+    image: bitnami/kubectl:latest
+    command: ["/bin/bash", "-c"]
+    args:
+      - |
+        while true; do
+          echo "Checking and labeling nodes..."
+          for node in \$(kubectl get nodes --no-headers | awk '{print \$1}'); do
+            if [[ \$(kubectl get node \$node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/master}') != "true" ]]; then
+              if [[ \$(kubectl get node \$node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/worker}') == "" ]]; then
+                kubectl label node \$node node-role.kubernetes.io/worker=
+                echo "Labeled node \$node as worker."
+              fi
+            fi
+          done
+          echo "Sleeping for 1 minute..."
+          sleep 60
+        done
+  restartPolicy: Always
+EOF
+    
+    if [ $? -eq 0 ]; then
+        echo_message SUCCESS "Node listener file created successfully at $LISTENER_NODE."
+        return 0
+    else
+        echo_message ERROR "Error creating the node listener file. Exit code: $?"
+        return 1
+    fi
+}
+
+
+apply_node_listener() {
+	echo_message INFO "Applying $LISTENER_NODE..."
+	sudo kubectl apply -f "${LISTENER_NODE}"
+	echo_message SUCCESS "$LISTENER_NODE applied successfully."
 }
 
 install_helm() {
@@ -498,7 +577,8 @@ install_helm() {
 
 manage_helm() {	
     if helm version >/dev/null 2>&1; then
-        echo "Helm is already installed."
+		echo -e "$(printf '=%.0s' {1..100})\n"
+        echo_message DEBUG "Helm is already installed."
         return 0
     fi
 		
@@ -545,7 +625,8 @@ manage_helm() {
 		fi
 		
     else
-        echo_message "Helm installation was skipped by the user."
+		echo -e "$(printf '=%.0s' {1..100})\n"
+        echo_message DEBUG "Helm installation was skipped by the user."
         return 2
 		
     fi
@@ -568,12 +649,44 @@ manage_worker_installation() {
 manage_master_installation() {
 	init_k8s_cluster
 	setup_local_k8s
+	sudo kubectl taint nodes $(hostname) node-role.kubernetes.io/control-plane:NoSchedule --overwrite=true
+
 	apply_calico
+	
+	create_node_listener_service
+	create_node_listener
+	apply_node_listener
+	
 	monitor
 	display
 }
 
 main() {
+	if [[ -f /etc/os-release ]]; then
+		. /etc/os-release
+		OS_NAME=$NAME
+		OS_VERSION=$VERSION_ID
+		echo_message DEBUG "Detected OS: $OS_NAME $OS_VERSION"
+		
+	else
+		echo_message ERROR "Unable to detect OS version."
+		exit 1
+		
+	fi
+
+	if [[ "$OS_NAME" = "Debian GNU/Linux" || "$OS_NAME" = "Ubuntu" ]]; then
+		if [[ "$OS_VERSION" != "11" && "$OS_VERSION" != "12" && "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
+			echo_message ERROR "Unsupported OS version: $OS_NAME $OS_VERSION"
+			exit 1
+			
+		fi
+		
+	else
+		echo_message ERROR "Unsupported OS: $OS_NAME"
+		exit 1
+		
+	fi
+	
 	if [ "$HELM_ONLY" = true ]; then
 		manage_helm
 	
@@ -585,11 +698,9 @@ main() {
 		manage_helm
 		
 		
-		echo -e "$(printf '=%.0s' {1..100})"
-		echo ""
-
-		echo "Use the following command to create new joining commands:"
-		echo "sudo kubeadm token create --print-join-command"
+		echo -e "$(printf '=%.0s' {1..100})\n"
+		printf "Use the following command to create new joining commands:\n"
+		printf "sudo kubeadm token create --print-join-command\n\n"
 		echo ""
 		
 		exit 0
@@ -598,10 +709,11 @@ main() {
 		manage_worker_installation
 		manage_helm
 		
-		echo -e "$(printf '=%.0s' {1..100})"
-		echo ""
-		echo "If you want to install helm in a later stage you can run:"
-		echo "sudo $0 -oh"
+		echo -e "$(printf '=%.0s' {1..100}\n)"
+		echo_message DEBUG "Run the following command in the master machine:"
+		echo_message DEBUG "sudo kubeadm token create --print-join-command"
+		echo_message DEBUG ""
+		echo_message DEBUG "Copy the output and run it on the agent machine."
 		echo ""
 		
 		exit 0
