@@ -1,7 +1,6 @@
 #!/bin/bash
 
 : <<'COMMENT'
-
 	Machine Pre Setup:
 		Hardware: 
 			Min 2 CPU, 4GB RAM
@@ -18,10 +17,12 @@
 				
 			- Install git docker-ce to install agent pre-dependencies.
 			- start docker service
+			- login to dockerhub account (if exists)
 			
 	TODO:
-		1. Add Rancher ???
-
+		1. Set parameter for time to wait between new worker node scanning (default=60)
+		2. Set parameter for setting the control-plane as a worker (default=true)
+			
 COMMENT
 
 if [ "$EUID" -ne 0 ]; then
@@ -62,27 +63,28 @@ echo_message() {
         INFO)
             printf "[ ... ] %s\n" "${message}"
             ;;
-		
+        
         DEBUG)
             printf "[ >> ] %s\n" "${message}"
             ;;
-			
+        
+        WARN)
+            printf " [\033[33m ! \033[0m] %s\n" "${message}"
+            ;;
+            
         SUCCESS)
             printf " [\033[32m + \033[0m] %s\n" "${message}"
             ;;
-			
+            
         ERROR)
             printf " [\033[31m - \033[0m] %s\n" "${message}"
             ;;
-			
+            
         *)
-            printf "%s\n" "${message}"
+            printf " [\033[33m ? \033[0m] Unknown status: %s\n" "${message}"
             ;;
-			
     esac
 }
-
-
 
 validate_ip() {
     local ip="$1"
@@ -147,14 +149,38 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-
 disable_swap() {
-	echo_message INFO "Disabling Swap..."
-	sudo swapoff -a > /dev/null 2>&1
-	sudo sed -i '/ swap / s/^/# /' /etc/fstab > /dev/null 2>&1
-	echo_message SUCCESS " Swap Disabled."
-	
+    echo_message INFO "Disabling Swap..."
+    if free | grep -q 'Swap:[[:space:]]*0'; then
+        echo_message WARN "Swap is already disabled."
+		
+    else
+        if sudo swapoff -a > /dev/null 2>&1; then
+            echo_message SUCCESS "Swapoff command executed successfully."
+			
+        else
+            echo_message ERROR "Failed to disable swap. Please check permissions."
+            return 1
+        fi
+    fi
+
+    if grep -E '\s+swap\s+' /etc/fstab > /dev/null; then
+        if sudo sed -i '/ swap / s/^/# /' /etc/fstab > /dev/null 2>&1; then
+            echo_message SUCCESS "Swap entry in /etc/fstab commented out successfully."
+        
+		else
+            echo_message ERROR "Failed to modify /etc/fstab. Please check file permissions."
+            return 1
+        fi
+		
+    else
+        echo_message ERROR "No swap entry found in /etc/fstab."
+		
+    fi
+
+    echo_message SUCCESS "Swap Disabled."
 }
+
 
 install_dependencies() {
 	echo_message INFO "Installing dependencies..."
@@ -325,8 +351,10 @@ display() {
 	kubectl get nodes
 	echo ""
 	
-	echo "CURRENT PODS >> "
-	kubectl get pods -n kube-system
+	echo "CLUSTER PODS >> "
+	kubectl get pods -A
+	echo ""
+	
 }
 
 are_all_nodes_ready() {
@@ -511,7 +539,6 @@ EOF
         return 1
     fi
 }
-
 
 apply_node_listener() {
 	echo_message INFO "Applying $LISTENER_NODE..."
@@ -719,5 +746,6 @@ main() {
 		exit 0
 	fi
 }
+
 
 main
