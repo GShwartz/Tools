@@ -90,21 +90,18 @@ validate_ip() {
     
     if [[ ${#octets[@]} -ne 4 ]]; then
 		echo_message ERROR "Error: Invalid IP address format."
-        #echo "Error: Invalid IP address format."
         exit 1
     fi
     
     for i in "${!octets[@]}"; do
         if ! [[ "${octets[$i]}" =~ ^[0-9]+$ ]] || [[ "${octets[$i]}" -lt 0 ]] || [[ "${octets[$i]}" -gt 255 ]]; then
             echo_message ERROR "Error: Invalid IP address. Each octet must be between 0 and 255."
-			#echo "Error: Invalid IP address. Each octet must be between 0 and 255."
             exit 1
         fi
     done
 
     if [[ "${octets[3]}" -eq 0 ]] || [[ "${octets[3]}" -gt 255 ]]; then
         echo_message ERROR "Error: Invalid IP address. The last octet cannot be 0 or greater than 254."
-		#echo "Error: Invalid IP address. The last octet cannot be 0 or greater than 254."
         exit 1
     fi
 }
@@ -146,7 +143,7 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         
         *) 
-            echo "Unknown parameter passed: $1"
+            echo_message ERROR "Unknown parameter passed: $1"
             show_help
             exit 1
             ;;
@@ -308,8 +305,8 @@ init_k8s_cluster() {
 		calculate_cidr $APISERVER_ADVERTISE_ADDRESS
     fi
 	
-	echo_message DEBUG "API: ${APISERVER_ADVERTISE_ADDRESS} | PNC: ${POD_NETWORK_CIDR}"
-    sudo kubeadm init --apiserver-advertise-address="$APISERVER_ADVERTISE_ADDRESS" --pod-network-cidr="$POD_NETWORK_CIDR"
+	echo_message DEBUG "API server advertise address: ${APISERVER_ADVERTISE_ADDRESS} | Pod Network CIDR: ${POD_NETWORK_CIDR}"
+    sudo kubeadm init --apiserver-advertise-address="$APISERVER_ADVERTISE_ADDRESS" --pod-network-cidr="$POD_NETWORK_CIDR" -v=0
 	
 	echo ""
 	echo_message SUCCESS "Kubernetes cluster initiated successfully."
@@ -330,7 +327,8 @@ apply_calico() {
 }
 
 display() {
-	echo -e "$(printf '=%.0s' {1..140})\n"
+	echo -e "$(printf '=%.0s' {1..100})"
+	echo ""
 	echo "CURRENT NODES >> "
 	kubectl get nodes
 	echo ""
@@ -450,20 +448,48 @@ manage_helm() {
         echo "Helm is already installed."
         return 0
     fi
+		
+	if [ "$HELM_ONLY" = true ]; then
+		install_helm
+		helm_install_status=$?
+	
+		if [ $helm_install_status -eq 0 ]; then
+			HELM_VER=$(helm version --short 2>/dev/null)
+			if [ -n "$HELM_VER" ]; then
+				echo_message DEBUG "HELM Version: ${HELM_VER}"
+				echo_message SUCCESS "Helm was successfully installed."
+				exit 0
 
+			else
+				echo_message ERROR "Unable to get Helm version."
+				exit 1
+
+			fi
+			
+		else
+			echo_message ERROR "Helm installation failed."
+			exit 1
+			
+		fi
+	fi
+	
     if [ "$INSTALL_HELM" = true ]; then
         install_helm
         helm_install_status=$?
         
         if [ $helm_install_status -eq 0 ]; then
-			echo_message SUCCESS "Helm was successfully installed."
-            return 0
-			
-        else
-			echo_message ERROR "Helm installation failed."
-            return 1
-			
-        fi
+			HELM_VER=$(helm version --short 2>/dev/null)
+			if [ -n "$HELM_VER" ]; then
+				echo_message DEBUG "HELM Version: ${HELM_VER}"
+				echo_message SUCCESS "Helm was successfully installed."
+				return 0
+
+			else
+				echo_message ERROR "Unable to get Helm version."
+				return 1
+
+			fi
+		fi
 		
     else
         echo_message "Helm installation was skipped by the user."
@@ -486,8 +512,7 @@ install_helm() {
     local helm_install_script_url="https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3"
     local helm_install_script="get_helm.sh"
 
-    printf '=%.0s' {1..140}
-    echo ""
+    echo -e "$(printf '=%.0s' {1..100})"
 	echo_message INFO "Installing Helm..."
     
     if ! command -v curl > /dev/null 2>&1; then
@@ -531,32 +556,7 @@ install_helm() {
 
 
 main() {
-    if [ "$HELM_ONLY" = true ]; then
-		install_helm
-		helm_install_status=$?
-
-		if [ $helm_install_status -eq 0 ]; then
-			echo_message SUCCESS "Helm was successfully installed."
-			
-		else
-			echo_message ERROR "Helm installation failed."
-			exit 1
-			
-		fi
-		
-		HELM_VER=$(helm version --short 2>/dev/null)
-		if [ -n "$HELM_VER" ]; then
-			echo_message DEBUG "HELM Version: ${HELM_VER}"
-
-		else
-			echo_message ERROR "Unable to get Helm version."
-
-		fi
-		
-		exit $helm_install_status
-	fi
-
-
+    manage_helm
     disable_swap
     install_dependencies
     open_ports
@@ -569,24 +569,25 @@ main() {
     config_k8s
     k8s_reload_restart
 	
-	if [ "$IS_MASTER" == true ]; then
+	if [ "$IS_MASTER" = true ]; then
 		init_k8s_cluster
 		setup_local_k8s
 		apply_calico
 		monitor
 		display
 
-		manage_helm
-		
-		echo -e "\n$(printf '=%.0s' {1..140})\n"
+		echo -e "$(printf '=%.0s' {1..100})"
+		echo ""
+
 		echo "Use the following command to create new joining commands:"
 		echo "sudo kubeadm token create --print-join-command"
+		echo ""
 		
 		exit 0
 	fi
-	
     
-    echo ""
+	echo -e "$(printf '=%.0s' {1..100})"
+	echo ""
     echo "If you want to install helm in a later stage you can run:"
     echo "sudo $0 -oh"
     echo ""
