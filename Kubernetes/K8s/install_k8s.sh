@@ -18,11 +18,6 @@
 			- Install git docker-ce to install agent pre-dependencies.
 			- start docker service
 			- login to dockerhub account (if exists)
-			
-	TODO:
-		1. Set parameter for time to wait between new worker node scanning (default=60)
-		2. Set parameter for setting the control-plane as a worker (default=true)
-			
 COMMENT
 
 if [ "$EUID" -ne 0 ]; then
@@ -31,6 +26,8 @@ fi
 	
 SCRIPT_DIR=$(dirname "$0")
 LISTENER_NODE="$SCRIPT_DIR/node_listener.yml"
+LISTENER_DEFAULT_TIMER=60
+MODIFY_CONTROL_PLANE=false
 IS_MASTER=false
 INSTALL_HELM=false
 HELM_ONLY=false
@@ -42,17 +39,21 @@ show_help() {
     printf "Default setting is set to install a WORKER node.\n\n"
     printf "Options:\n"
     printf "  -h, --help                       			Display this help message.\n"
-	printf "  -m, --master 						Install K8s master\n"
+    printf "  -m, --master 						Install K8s master.\n"
     printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster.\n"
     printf "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup.\n"
-    printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server.\n\n"
+    printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server.\n"
+    printf "  -st, --sleep-time [SECONDS]        			Specify the sleep time (in seconds) for the node listener between checks. Default is 60 seconds.\n"
+    printf "  -mcp, --modify-control-plane      			Allow the node listener to modify control-plane nodes (default is to skip control-plane nodes).\n\n"
     printf "Description:\n"
     printf "  This script sets up a Kubernetes cluster, initializes it with kubeadm,\n"
     printf "  configures kubectl for the user, and applies the Calico network plugin.\n"
     printf "  Optionally, it can also install Helm based on user input or the --with-helm flag.\n"
     printf "  The --only-helm flag skips Kubernetes setup and only installs Helm.\n"
     printf "  You can specify the API server's IP address, and the pod network CIDR will be\n"
-    printf "  automatically generated based on that IP.\n\n"
+    printf "  automatically generated based on that IP.\n"
+    printf "  Additionally, you can customize the behavior of the node listener using the\n"
+    printf "  --sleep-time and --modify-control-plane flags.\n"
 }
 
 echo_message() {
@@ -116,10 +117,10 @@ calculate_cidr() {
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-		-m|--master)
-			IS_MASTER=true
-			;;
-	
+        -m|--master)
+            IS_MASTER=true
+            ;;
+        
         -wh|--with-helm)
             INSTALL_HELM=true
             ;;
@@ -133,6 +134,19 @@ while [[ "$#" -gt 0 ]]; do
             validate_ip "$APISERVER_ADVERTISE_ADDRESS"
             calculate_cidr "$APISERVER_ADVERTISE_ADDRESS"
             shift
+            ;;
+        
+        -st|--sleep-time)
+            LISTENER_DEFAULT_TIMER="$2"
+            if ! [[ "$LISTENER_DEFAULT_TIMER" =~ ^[0-9]+$ ]]; then
+                echo_message ERROR "Invalid sleep time. It must be a positive integer."
+                exit 1
+            fi
+            shift
+            ;;
+        
+        -mcp|--modify-control-plane)
+            MODIFY_CONTROL_PLANE=true
             ;;
         
         -h|--help)
@@ -460,7 +474,7 @@ monitor() {
 
 create_node_listener_service() {
 	echo_message INFO "Creating node listener service..."
-	cat <<EOF | sudo kubectl apply -f -
+	cat <<EOF | sudo kubectl apply -f - > /dev/null
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -490,7 +504,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 EOF
 
-	echo_message INFO "Service created successfully."
+	echo_message SUCCESS "Service created successfully."
 }
 
 create_node_listener() {
@@ -501,34 +515,42 @@ kind: Pod
 metadata:
   name: node-labeler
   namespace: default
+  
 spec:
-  serviceAccountName: node-labeler-sa  # <-- Ensure the ServiceAccount is properly used
+  serviceAccountName: node-labeler-sa
   tolerations:
   - key: "node-role.kubernetes.io/control-plane"
     operator: "Exists"
-    effect: "NoSchedule"  # Tolerate control-plane taint
+    effect: "NoSchedule"
+  
   containers:
   - name: label-nodes
     image: bitnami/kubectl:latest
-    command: ["/bin/bash", "-c"]
+    command:
+      - /bin/bash
+      - -c
     args:
       - |
         while true; do
           echo "Checking and labeling nodes..."
           for node in \$(kubectl get nodes --no-headers | awk '{print \$1}'); do
-            if [[ \$(kubectl get node \$node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/master}') != "true" ]]; then
-              if [[ \$(kubectl get node \$node --output=jsonpath='{.metadata.labels.node-role\.kubernetes\.io/worker}') == "" ]]; then
-                kubectl label node \$node node-role.kubernetes.io/worker=
-                echo "Labeled node \$node as worker."
-              fi
+            control_plane_taint=\$(kubectl get node \$node --output=jsonpath='{.metadata.labels["node-role.kubernetes.io/control-plane"]}')
+            if [[ "$MODIFY_CONTROL_PLANE" == "false" && "\$control_plane_taint" == "true" ]]; then
+              echo "Skipping control-plane node: \$node"
+              continue
+            fi
+
+            if [[ \$(kubectl get node \$node --output=jsonpath='{.metadata.labels["node-role.kubernetes.io/worker"]}') == "" ]]; then
+              kubectl label node \$node node-role.kubernetes.io/worker= --overwrite
+              echo "Labeled node \$node as worker."
             fi
           done
-          echo "Sleeping for 1 minute..."
-          sleep 60
+          echo "Sleeping for $LISTENER_DEFAULT_TIMER seconds..."
+          sleep $LISTENER_DEFAULT_TIMER
         done
   restartPolicy: Always
 EOF
-    
+
     if [ $? -eq 0 ]; then
         echo_message SUCCESS "Node listener file created successfully at $LISTENER_NODE."
         return 0
@@ -540,7 +562,7 @@ EOF
 
 apply_node_listener() {
 	echo_message INFO "Applying $LISTENER_NODE..."
-	sudo kubectl apply -f "${LISTENER_NODE}"
+	sudo kubectl apply -f "${LISTENER_NODE}" > /dev/null
 	echo_message SUCCESS "$LISTENER_NODE applied successfully."
 }
 
