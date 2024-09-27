@@ -1,29 +1,28 @@
 #!/bin/bash
 
-#
-#	Machine Pre Setup:
-#		Hardware: 
-#			Min 2 CPU, 4GB RAM
-#		
-#		Software:
-#			curl, sudo - set no passwd for user & usermod to sudo group
-#
-#		If the machine will be a CI/CD agent:
-#			- add current user to sudo group:
-#				sudo usermod -aG sudo $(whoami)
-#			
-#			- use visudo to remove the need for sudo password:
-#				username	ALL=(ALL) NOPASSWD:ALL
-#				
-#			- Install git docker-ce to install agent pre-dependencies.
-#			- start docker service
-#		
-#	TODO:
-#		1. Dynamic dependencies package additions from the CLI
-#		2. Compatability with Ubuntu 24.04 
-#		3. Add logging to file
-#
+: <<'COMMENT'
+	Machine Pre Setup:
+		Hardware: 
+			Min 2 CPU, 4GB RAM
+			
+		Software:
+			curl, sudo - set no passwd for user & usermod to sudo group
 
+		If the machine will be a CI/CD agent:
+			- add current user to sudo group:
+				sudo usermod -aG sudo $(whoami)
+				
+			- use visudo to remove the need for sudo password:
+				username	ALL=(ALL) NOPASSWD:ALL
+				
+			- Install git docker-ce to install agent pre-dependencies.
+			- start docker service
+			
+	TODO:
+		1. Compatability with Ubuntu 24.04 
+		2. Add logging to file
+
+COMMENT
 
 if [ "$EUID" -ne 0 ]; then
     exec sudo "$0" "$@"
@@ -38,7 +37,9 @@ POD_NETWORK_CIDR=""
 
 show_help() {
     printf "Usage: $0 [OPTIONS]"
-    printf
+	printf ""
+    printf "Default setting is set to install a WORKER node."
+	printf ""
     printf "Options:"
     printf "  -h, --help                       			Display this help message."
 	printf "  -m, --master 						Install K8s master"
@@ -46,7 +47,7 @@ show_help() {
     printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster."
     printf "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup."
     printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server."
-    printf
+    printf ""
     printf "Description:"
     printf "  This script sets up a Kubernetes cluster, initializes it with kubeadm,"
     printf "  configures kubectl for the user, and applies the Calico network plugin."
@@ -54,7 +55,7 @@ show_help() {
     printf "  The --only-helm flag skips Kubernetes setup and only installs Helm."
     printf "  You can specify the API server's IP address, and the pod network CIDR will be"
     printf "  automatically generated based on that IP."
-	printf 
+	printf ""
 }
 
 echo_message() {
@@ -118,10 +119,6 @@ while [[ "$#" -gt 0 ]]; do
 			IS_MASTER=true
 			;;
 	
-		-w|--worker)
-			IS_MASTER=false
-			;;
-		
         -wh|--with-helm)
             INSTALL_HELM=true
             ;;
@@ -443,61 +440,6 @@ monitor() {
 	done
 }
 
-manage_helm() {	
-    if helm version >/dev/null 2>&1; then
-        echo "Helm is already installed."
-        return 0
-    fi
-		
-	if [ "$HELM_ONLY" = true ]; then
-		install_helm
-		helm_install_status=$?
-	
-		if [ $helm_install_status -eq 0 ]; then
-			HELM_VER=$(helm version --short 2>/dev/null)
-			if [ -n "$HELM_VER" ]; then
-				echo_message DEBUG "HELM Version: ${HELM_VER}"
-				echo_message SUCCESS "Helm was successfully installed."
-				exit 0
-
-			else
-				echo_message ERROR "Unable to get Helm version."
-				exit 1
-
-			fi
-			
-		else
-			echo_message ERROR "Helm installation failed."
-			exit 1
-			
-		fi
-	fi
-	
-    if [ "$INSTALL_HELM" = true ]; then
-        install_helm
-        helm_install_status=$?
-        
-        if [ $helm_install_status -eq 0 ]; then
-			HELM_VER=$(helm version --short 2>/dev/null)
-			if [ -n "$HELM_VER" ]; then
-				echo_message DEBUG "HELM Version: ${HELM_VER}"
-				echo_message SUCCESS "Helm was successfully installed."
-				return 0
-
-			else
-				echo_message ERROR "Unable to get Helm version."
-				return 1
-
-			fi
-		fi
-		
-    else
-        echo_message "Helm installation was skipped by the user."
-        return 2
-		
-    fi
-}
-
 install_helm() {
     install_curl_package() {
         sudo apt-get update > /dev/null 2>&1
@@ -554,9 +496,62 @@ install_helm() {
     fi
 }
 
+manage_helm() {	
+    if helm version >/dev/null 2>&1; then
+        echo "Helm is already installed."
+        return 0
+    fi
+		
+	if [ "$HELM_ONLY" = true ]; then
+		install_helm
+		helm_install_status=$?
+	
+		if [ $helm_install_status -eq 0 ]; then
+			HELM_VER=$(helm version --short 2>/dev/null)
+			if [ -n "$HELM_VER" ]; then
+				echo_message DEBUG "HELM Version: ${HELM_VER}"
+				echo_message SUCCESS "Helm was successfully installed."
+				exit 0
 
-main() {
-    manage_helm
+			else
+				echo_message ERROR "Unable to get Helm version."
+				exit 1
+
+			fi
+			
+		else
+			echo_message ERROR "Helm installation failed."
+			exit 1
+			
+		fi
+	fi
+	
+    if [ "$INSTALL_HELM" = true ]; then
+        install_helm
+        helm_install_status=$?
+        
+        if [ $helm_install_status -eq 0 ]; then
+			HELM_VER=$(helm version --short 2>/dev/null)
+			if [ -n "$HELM_VER" ]; then
+				echo_message DEBUG "HELM Version: ${HELM_VER}"
+				echo_message SUCCESS "Helm was successfully installed."
+				return 0
+
+			else
+				echo_message ERROR "Unable to get Helm version."
+				return 1
+
+			fi
+		fi
+		
+    else
+        echo_message "Helm installation was skipped by the user."
+        return 2
+		
+    fi
+}
+
+manage_worker_installation() {
     disable_swap
     install_dependencies
     open_ports
@@ -568,14 +563,28 @@ main() {
     install_k8s
     config_k8s
     k8s_reload_restart
+}
+
+manage_master_installation() {
+	init_k8s_cluster
+	setup_local_k8s
+	apply_calico
+	monitor
+	display
+}
+
+main() {
+	if [ "$HELM_ONLY" = true ]; then
+		manage_helm
+	
+	fi
 	
 	if [ "$IS_MASTER" = true ]; then
-		init_k8s_cluster
-		setup_local_k8s
-		apply_calico
-		monitor
-		display
-
+		manage_worker_installation
+		manage_master_installation
+		manage_helm
+		
+		
 		echo -e "$(printf '=%.0s' {1..100})"
 		echo ""
 
@@ -584,15 +593,19 @@ main() {
 		echo ""
 		
 		exit 0
-	fi
-    
-	echo -e "$(printf '=%.0s' {1..100})"
-	echo ""
-    echo "If you want to install helm in a later stage you can run:"
-    echo "sudo $0 -oh"
-    echo ""
 	
-	exit 0
+	else
+		manage_worker_installation
+		manage_helm
+		
+		echo -e "$(printf '=%.0s' {1..100})"
+		echo ""
+		echo "If you want to install helm in a later stage you can run:"
+		echo "sudo $0 -oh"
+		echo ""
+		
+		exit 0
+	fi
 }
 
 main
