@@ -5,19 +5,6 @@
 		Hardware: 
 			Min 2 CPU, 4GB RAM
 			
-		Software:
-			curl, sudo - set no passwd for user & usermod to sudo group
-		If the machine will be a CI/CD agent:
-			- add current user to sudo group:
-				sudo usermod -aG sudo $(whoami)
-				
-			- use visudo to remove the need for sudo password:
-				username	ALL=(ALL) NOPASSWD:ALL
-				
-			- Install git docker-ce to install agent pre-dependencies.
-			- start docker service
-			- login to dockerhub account (if exists)
-			
 COMMENT
 
 if [ "$EUID" -ne 0 ]; then
