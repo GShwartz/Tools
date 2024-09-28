@@ -49,7 +49,7 @@ The default setting installs a **worker node**. You can customize the setup with
 Install a Kubernetes master node with Helm:
 
 ```bash
-./bundle.sh --master --with-helm
+./install_k8s.sh --master --with-helm
 ```
 
 ## Features
