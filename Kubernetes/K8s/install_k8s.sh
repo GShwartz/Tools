@@ -18,9 +18,6 @@
 			- start docker service
 			- login to dockerhub account (if exists)
 			
-	TODO:
-		1. Set parameter for time to wait between new worker node scanning (default=60)
-			
 COMMENT
 
 if [ "$EUID" -ne 0 ]; then
@@ -29,6 +26,7 @@ fi
 
 SCRIPT_DIR=$(dirname "$0")
 LISTENER_NODE="$SCRIPT_DIR/node_listener.yml"
+LISTENER_SLEEP_TIME=60
 IS_MASTER=false
 INSTALL_HELM=false
 HELM_ONLY=false
@@ -41,9 +39,10 @@ show_help() {
     printf "Options:\n"
     printf "  -h, --help                       			Display this help message.\n"
 	printf "  -m, --master 						Install K8s master\n"
-    printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster.\n"
+	printf "  -s, --sleep [SECONDS]                			Set the number of seconds between each new node scan.\n"
+	printf "  -wh, --with-helm                	 		Automatically install Helm after setting up the Kubernetes cluster.\n"
     printf "  -oh, --only-helm                 			Only install Helm, skip Kubernetes setup.\n"
-    printf "  -aa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server.\n\n"
+    printf "  -aaa, --apiserver-advertise-address [IP] 		Specify the IP address for the Kubernetes API server.\n\n"
     printf "Description:\n"
     printf "  This script sets up a Kubernetes cluster, initializes it with kubeadm,\n"
     printf "  configures kubectl for the user, and applies the Calico network plugin.\n"
@@ -84,6 +83,13 @@ echo_message() {
     esac
 }
 
+validate_sleep_time() {
+    if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+        echo_message ERROR "Error: Sleep time must be a positive integer."
+        exit 1
+    fi
+}
+
 validate_ip() {
     local ip="$1"
     IFS='.' read -r -a octets <<< "$ip"
@@ -114,10 +120,21 @@ calculate_cidr() {
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-		-m|--master)
-			IS_MASTER=true
-			;;
-
+		-h|--help)
+            show_help
+            exit 0
+            ;;
+			
+        -m|--master)
+            IS_MASTER=true
+            ;;
+		
+		-s|--sleep-time)
+            LISTENER_SLEEP_TIME="$2"
+            validate_sleep_time "$LISTENER_SLEEP_TIME"
+            shift
+            ;;
+			
         -wh|--with-helm)
             INSTALL_HELM=true
             ;;
@@ -126,19 +143,14 @@ while [[ "$#" -gt 0 ]]; do
             HELM_ONLY=true
             ;;
 
-        -aa|--apiserver-advertise-address)
+        -aaa|--apiserver-advertise-address)
             APISERVER_ADVERTISE_ADDRESS="$2"
             validate_ip "$APISERVER_ADVERTISE_ADDRESS"
             calculate_cidr "$APISERVER_ADVERTISE_ADDRESS"
             shift
             ;;
 
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-
-        *) 
+        *)
             echo_message ERROR "Unknown parameter passed: $1"
             show_help
             exit 1
@@ -520,8 +532,8 @@ spec:
               fi
             fi
           done
-          echo "Sleeping for 1 minute..."
-          sleep 60
+          echo "Sleeping for $LISTENER_SLEEP_TIME seconds..."
+          sleep $LISTENER_SLEEP_TIME
         done
   restartPolicy: Always
 EOF
@@ -545,6 +557,13 @@ taint_nodes() {
 	echo_message INFO "Tainting current nodes..."
 	sudo kubectl taint nodes $(hostname) node-role.kubernetes.io/control-plane:NoSchedule --overwrite=true > /dev/null
 	echo_message SUCCESS "Tainting completed."
+}
+
+apply_ingress() {
+	echo_message INFO "Applying Ingress controller..."
+	sudo kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml > /dev/null
+	echo_message INFO "Ingress controller applied."
+
 }
 
 install_helm() {
@@ -660,6 +679,16 @@ manage_helm() {
     fi
 }
 
+cleanup() {
+	if [ -f "$LISTENER_NODE" ]; then
+		echo_message INFO "Removing $LISTENER_NODE..."
+		rm -f "$LISTENER_NODE"
+		echo_message SUCCESS "$LISTENER_NODE Removed."
+	
+	fi
+
+}
+
 manage_worker_installation() {
     disable_swap
     install_dependencies
@@ -677,13 +706,14 @@ manage_worker_installation() {
 manage_master_installation() {
 	init_k8s_cluster
 	setup_local_k8s
-	taint_nodes
+	#taint_nodes
 	apply_calico
 	create_node_listener_service
 	create_node_listener
 	apply_node_listener
 	monitor
 	display
+	cleanup
 }
 
 
@@ -723,7 +753,6 @@ main() {
 		manage_master_installation
 		manage_helm
 
-
 		echo -e "$(printf '=%.0s' {1..100})\n"
 		printf "Use the following command to create new joining commands:\n"
 		printf "sudo kubeadm token create --print-join-command\n\n"
@@ -745,5 +774,6 @@ main() {
 		exit 0
 	fi
 }
+
 
 main
