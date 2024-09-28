@@ -1,64 +1,83 @@
-# Comprehensive Automation Script for Kubernetes Cluster Setup with Optional Helm Installation
+# Kubernetes Cluster Setup Script
 
-## Overview
+This Bash script automates the process of setting up a Kubernetes cluster, including the installation of necessary dependencies, Kubernetes, and optional Helm deployment. It supports configuring either a master or worker node and can be tailored to your environment.
 
-These scripts automates the process of setting up a Kubernetes cluster and/or nodes, simplifying a complex multi-step procedure. 
+## Prerequisites
 
-## Key Features
+Ensure that the machine where this script is run meets the following requirements:
 
-### **Master**: Automated Kubernetes Cluster Initialization
+### Hardware
+- Minimum: 2 CPUs, 4GB RAM
 
-- **Cluster Setup with `kubeadm`**: Automatically initializes a Kubernetes cluster using `kubeadm` for simplified cluster creation.
-- **Configures `kubectl`**: Sets up `kubectl`, the command-line interface for Kubernetes, so users can interact with the cluster immediately.
-- **Applies Calico Network Plugin**: Installs the Calico plugin to manage networking within the cluster, ensuring efficient communication between components.
+To prepare the machine as a CI/CD agent, ensure:
+- The user is added to the sudo group:
+  ```bash
+  sudo usermod -aG sudo $(whoami)
+  ```
+- Passwordless `sudo` is enabled by adding the following line in `visudo`:
+  ```text
+  username ALL=(ALL) NOPASSWD:ALL
+  ```
+- Docker and Git are installed:
+  ```bash
+  sudo apt install git docker-ce -y
+  sudo systemctl start docker
+  docker login
+  ```
 
-### Container Runtime Installation
+## Usage
 
-- **Installs and Configures `containerd`**: Sets up `containerd`, the necessary container runtime for running containers within Kubernetes.
+The default setting installs a **worker node**. You can customize the setup with the following options:
 
-### **Master**: Optional Helm Installation
+```bash
+./bundle.sh [OPTIONS]
+```
 
-- **Interactive or Automatic Installation**: Offers the choice to install Helm automatically using a command-line option or interactively by prompting the user.
-- **Dependency Checks**: Ensures dependencies like `curl` and `git` are installed before proceeding with Helm installation.
+### Options
 
-### **Master**: Monitoring and Verification
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Display the help message |
+| `-m, --master` | Install Kubernetes master node |
+| `-s, --sleep [SECONDS]` | Set sleep time between node scans (default: 60 seconds) |
+| `-wh, --with-helm` | Install Helm after Kubernetes cluster setup |
+| `-oh, --only-helm` | Install only Helm, skipping Kubernetes setup |
+| `-aaa, --apiserver-advertise-address [IP]` | Specify the Kubernetes API server's IP address |
 
-- **Status Checks**: Verifies that all nodes and system pods are in a ready state before proceeding with further setup.
-- **Displays Cluster Information**: Provides information about the cluster's status, including nodes and system pods.
+### Example
 
-### Security and Networking Configuration
+Install a Kubernetes master node with Helm:
 
-- **Network Port Configuration**: Configures the firewall to allow traffic on necessary ports required by Kubernetes components.
-- **Signing Keys and Repository Updates**: Ensures that the latest security keys and repositories are used for installation.
+```bash
+./bundle.sh --master --with-helm
+```
 
-### Cleanup and Maintenance
+## Features
 
-- **Removes Old Configurations**: Cleans up existing Kubernetes configurations to prevent conflicts.
-- **System Updates**: Runs system updates to ensure all software is up-to-date before starting the installation.
+- Automatically installs Kubernetes (`kubeadm`, `kubectl`, `kubelet`) and configures the environment.
+- Optionally installs Helm for managing Kubernetes applications.
+- Configures the Calico network plugin by default.
+- Supports both master and worker node setup.
+- Can be integrated into CI/CD environments.
 
-## Benefits
+## Kubernetes Cluster Setup Steps
 
-- **Time Savings**: Automates a time-consuming setup process, allowing team members to focus on critical tasks.
-- **Consistency**: Ensures every Kubernetes cluster is set up the same way, reducing errors and inconsistencies.
-- **Accessibility**: Makes Kubernetes setup accessible to users who may not have extensive experience with Kubernetes or system administration.
-- **Efficiency**: Streamlines deployment, especially useful in environments where clusters are frequently created or updated.
+1. **Disable Swap:** Ensures swap is disabled for Kubernetes to function properly.
+2. **Install Dependencies:** Installs essential packages (`ufw`, `curl`, `socat`, `containerd`, etc.).
+3. **Open Necessary Ports:** Opens ports for the Kubernetes API server, etcd, and other essential services.
+4. **Kubernetes Initialization:** Sets up the master node using `kubeadm` and applies the Calico network plugin.
+5. **Helm Setup (Optional):** Installs Helm if specified.
+6. **Node Monitoring:** Sets up a node listener to label and monitor the nodes for readiness.
 
-## Why It Matters
+## Troubleshooting
 
-- **Accelerates Development**: Developers can quickly set up Kubernetes environments without deep technical knowledge.
-- **Enhances Team Productivity**: Reduces setup time and potential errors, allowing teams to work more efficiently.
-- **Supports Modern DevOps Practices**: Automation is a key DevOps principle, and this script automates infrastructure setup.
-- **Simplifies Onboarding**: New team members can get up and running quickly with the help of this script.
+- Ensure the correct version of Ubuntu or Debian is used: `Debian 11`, `Debian 12`, `Ubuntu 22.04`, or `Ubuntu 24.04`.
+- For joining worker nodes to the master node, run the following on the master:
+  ```bash
+  sudo kubeadm token create --print-join-command
+  ```
+  Copy and run the output command on the worker nodes.
 
-## Conclusion
+## License
 
-By automating essential tasks and configurations, it ensures environments are 
-- consistent
-- secure
-- ready for application deployment.
-  
-#### It saves time, reduces errors, and makes Kubernetes accessible to a broader range of users within an organization.
----
-
-
-
+This script is open-source and distributed under the MIT License.
