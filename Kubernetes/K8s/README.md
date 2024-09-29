@@ -71,7 +71,7 @@ Install a Kubernetes master node with Helm:
 
 ## Troubleshooting
 
-- Ensure the correct version of Ubuntu or Debian is used: `Debian 11`, `Debian 12`, `Ubuntu 22.04`, or `Ubuntu 24.04`.
+- Ensure the correct version of Ubuntu or Debian is used: `Debian 12` or `Ubuntu 24.04`.
 - For joining worker nodes to the master node, run the following on the master:
   ```bash
   sudo kubeadm token create --print-join-command
