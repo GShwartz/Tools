@@ -116,7 +116,7 @@ while [[ "$#" -gt 0 ]]; do
             IS_MASTER=true
             ;;
 		
-		-s|--sleep-time)
+		-s|--sleep)
             LISTENER_SLEEP_TIME="$2"
             validate_sleep_time "$LISTENER_SLEEP_TIME"
             shift
@@ -185,6 +185,7 @@ install_dependencies() {
 
 open_ports() {
 	echo_message INFO "Opening necessary ports..."
+	sudo ufw allow SSH > /dev/null 2>&1   		# SSH Connection
 	sudo ufw allow 6443/tcp > /dev/null 2>&1   		# Kubernetes API server
 	sudo ufw allow 2379:2380/tcp > /dev/null 2>&1  	# etcd server client API
 	sudo ufw allow 10250/tcp > /dev/null 2>&1  		# Kubelet API
@@ -200,7 +201,8 @@ config_sysctl_params() {
 
 	sudo modprobe overlay > /dev/null
 	sudo modprobe br_netfilter > /dev/null
-
+	
+	echo_message DEBUG "OS NAME: $OS_NAME | OS VERSION: $OS_VERSION"
 	sudo tee /etc/sysctl.d/kubernetes.conf > /dev/null <<EOF
 net.bridge.bridge-nf-call-iptables  = 1
 net.ipv4.ip_forward                 = 1
@@ -659,8 +661,6 @@ manage_helm() {
 		fi
 
     else
-		echo -e "$(printf '=%.0s' {1..100})\n"
-        echo_message DEBUG "Helm installation was skipped by the user."
         return 2
 
     fi
@@ -701,6 +701,8 @@ manage_master_installation() {
 	monitor
 	display
 	cleanup
+	sudo kubectl config use-context kubernetes-admin@kubernetes
+	sudo kubectl taint nodes k8s-master node-role.kubernetes.io/control-plane:NoSchedule-
 }
 
 
